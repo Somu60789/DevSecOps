@@ -1,24 +1,29 @@
-// Example job definition (place under ci/scans/... in ep-pipelines, alongside
-// the existing fetch-checkmarx-report job). Loads the shared library, then calls
-// the agentic remediation step. SCAN_ID comes from a prior scan or the
-// fetch-checkmarx-report output.
+// Example job definition. Loads your Jenkins shared library that exposes the
+// remediateCheckmarx step, then calls it. SCAN_ID comes from a prior scan or a
+// fetch-report step.
+//
+// To make the step available, publish jenkins/vars/ from this product as a
+// Jenkins Global Pipeline Library, or vendor it into your existing library.
 
-library identifier: 'ep-pipelines@master', changelog: false, retriever: modernSCM(github(
-    credentialsId: 'github-credentials', repository: 'ep-pipelines', repoOwner: 'tmlconnected'
+library identifier: 'devsecops@v1', changelog: false, retriever: modernSCM(github(
+    credentialsId: 'github-credentials', repository: 'devsecops', repoOwner: 'your-org'
 ))
 
 properties([
     parameters([
         string(name: 'SCAN_ID', defaultValue: '', description: 'Checkmarx scan id to remediate'),
-        string(name: 'CODE_REPO', defaultValue: 'https://github.com/tmlconnected/cvp-vehicle-service.git',
-               description: 'Code repository to remediate and raise the PR against')
+        string(name: 'CODE_REPO', defaultValue: 'https://github.com/your-org/your-service.git',
+               description: 'Code repository to remediate and raise the PR against'),
+        string(name: 'CHECKMARX_URL', defaultValue: 'https://checkmarx.your-company.example',
+               description: 'On-prem CxSAST server URL')
     ])
 ])
 
 remediateCheckmarx {
     code_repo      = params.CODE_REPO
     scan_id        = params.SCAN_ID
-    devsecops_repo = 'https://github.com/Somu60789/DevSecOps.git'
+    checkmarx_url  = params.CHECKMARX_URL
+    devsecops_repo = 'https://github.com/your-org/devsecops.git'
     devsecops_ref  = 'v1'
     agent_cmd      = 'python3 .devsecops/scripts/agents/bedrock-agent.py'
 }

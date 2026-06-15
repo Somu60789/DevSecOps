@@ -1,18 +1,18 @@
-// remediateCheckmarx — agentic remediation step for the existing Jenkins
-// Checkmarx flow (e.g. tmlconnected/ep-pipelines).
+// remediateCheckmarx — agentic remediation step for an existing Jenkins
+// Checkmarx (on-prem CxSAST) flow.
 //
-// It picks up where fetchCheckmarxReport leaves off: take the CxSAST XML report
+// It picks up where a fetch-report step leaves off: take the CxSAST XML report
 // for a scan, normalize it with the portable DevSecOps scripts, have the agent
 // remediate the findings, and raise a remediation PR on the code repo. It never
 // pushes to the default branch — the PR-merge human gate is preserved.
 //
-// Usage (Jenkinsfile / job DSL), mirroring the existing shared-library style:
+// Usage (Jenkinsfile / job DSL), mirroring the shared-library style:
 //
-//   library identifier: 'ep-pipelines@master', ...
 //   remediateCheckmarx {
-//       code_repo        = 'https://github.com/tmlconnected/cvp-vehicle-service.git'
+//       code_repo        = 'https://github.com/your-org/your-service.git'
 //       scan_id          = '12345'                 // Checkmarx scan id to fetch
-//       devsecops_repo   = 'https://github.com/Somu60789/DevSecOps.git'
+//       checkmarx_url    = 'https://checkmarx.your-company.example'
+//       devsecops_repo   = 'https://github.com/your-org/devsecops.git'
 //       devsecops_ref    = 'v1'
 //       agent_cmd        = 'python3 .devsecops/scripts/agents/bedrock-agent.py'
 //   }
@@ -20,7 +20,7 @@
 // Credentials expected on the Jenkins agent:
 //   - checkmarx-creds   (username/password for the CxSAST REST API)
 //   - github-credentials (to clone the code repo and the DevSecOps repo, and push the branch)
-// plus AWS credentials in the environment for the Bedrock agent.
+// plus credentials for whatever AGENT_CMD runtime you configure.
 
 def call(body) {
     def config = [:]
@@ -30,11 +30,15 @@ def call(body) {
 
     CODE_REPO       = config.code_repo
     SCAN_ID         = config.scan_id
-    DEVSECOPS_REPO  = config.devsecops_repo ?: 'https://github.com/Somu60789/DevSecOps.git'
+    DEVSECOPS_REPO  = config.devsecops_repo
     DEVSECOPS_REF   = config.devsecops_ref ?: 'v1'
     AGENT_CMD       = config.agent_cmd ?: 'python3 .devsecops/scripts/agents/bedrock-agent.py'
-    CHECKMARX_URL   = config.checkmarx_url ?: 'https://checkmarx.home.tatamotors'
+    CHECKMARX_URL   = config.checkmarx_url   // required — no internal default
     DOWNSTREAM_JOBS = config.downstream_jobs ?: []
+
+    if (!CODE_REPO)     error "remediateCheckmarx: 'code_repo' is required."
+    if (!DEVSECOPS_REPO) error "remediateCheckmarx: 'devsecops_repo' is required."
+    if (!CHECKMARX_URL) error "remediateCheckmarx: 'checkmarx_url' is required."
 
     pipeline {
         agent any

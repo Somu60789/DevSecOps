@@ -27,13 +27,13 @@ CX_XML = """<?xml version="1.0" encoding="utf-8"?>
 <CxXMLResults ProjectName="AvantGarde-CV" ScanId="123">
   <Query name="SQL_Injection" Severity="High" cweId="89">
     <Result FileName="src/main/java/Dao.java" Line="42" Status="New"
-            Severity="High" DeepLink="https://checkmarx.home.tatamotors/x">
+            Severity="High" DeepLink="https://checkmarx.example.com/x">
       <Path/>
     </Result>
   </Query>
   <Query name="Hardcoded_Password" Severity="Medium" cweId="259">
     <Result FileName="src/main/java/Conf.java" Line="7" Status="Recurrent"
-            Severity="Medium" DeepLink="https://checkmarx.home.tatamotors/y">
+            Severity="Medium" DeepLink="https://checkmarx.example.com/y">
       <Path/>
     </Result>
   </Query>

@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a problem with a workflow, script, or the agent loop
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / ref
+      description: Which tag or ref are you calling (e.g. v1, v1.0.0, main)?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - security scan
+        - AI triage / fix
+        - PR review comment
+        - docs
+        - checkmarx
+        - build / publish
+        - test / coverage
+        - deploy
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Caller workflow snippet, inputs, and a link to a failing run if possible.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      render: shell
