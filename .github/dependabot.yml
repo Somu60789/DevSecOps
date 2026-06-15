@@ -1,0 +1,23 @@
+version: 2
+updates:
+  # Keep the actions we pin up to date.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The composite actions reference actions too.
+  - package-ecosystem: github-actions
+    directory: "/.github/actions/checkmarx-scan"
+    schedule:
+      interval: weekly
+    labels: [dependencies]
+  - package-ecosystem: github-actions
+    directory: "/.github/actions/docker-publish"
+    schedule:
+      interval: weekly
+    labels: [dependencies]
