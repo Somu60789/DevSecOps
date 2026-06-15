@@ -1,0 +1,45 @@
+# DevSecOps agent configuration
+# Tool toggles, severity thresholds, and paths. Consumed by the scanner
+# pipeline and the AI agent stages. Edit here, not in workflow YAML.
+
+schema_version: "1"
+
+# Which scanner classes run. Stack auto-detection further gates these:
+# a toggle that is `true` here still only runs if the relevant stack is present.
+scanners:
+  sast: true          # semgrep / codeql
+  sca: true           # trivy filesystem
+  secret: true        # gitleaks
+  container: true     # trivy image (only if a Dockerfile is present)
+  iac: true           # checkov (only if IaC files are present)
+  license: true       # trivy license
+  complexity: true    # lizard / radon
+  duplication: true   # jscpd
+  deadcode: true      # ts-prune / vulture
+
+# Severity at or above which a finding counts as a failure in the PR summary.
+# warnings are everything below this but above `info`.
+thresholds:
+  fail_at: high       # critical|high|medium|low|info
+  warn_at: medium
+
+# Clean-code baseline limits (reported, mostly not auto-fixed).
+clean_code:
+  max_function_lines: 40
+  max_cyclomatic_complexity: 10
+  min_identifier_length: 3      # excludes conventional loop vars (i, j, k, _)
+  max_duplication_percent: 5
+  stale_todo_days: 30
+
+# Paths excluded from all scanning.
+exclude:
+  - ".git/**"
+  - "node_modules/**"
+  - "dist/**"
+  - "build/**"
+  - "**/*.min.js"
+  - "vendor/**"
+
+# Where the normalized output lands.
+output:
+  findings_file: "findings.json"
