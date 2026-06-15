@@ -28,7 +28,7 @@ AGENT_BACKOFF="${AGENT_BACKOFF:-2}"
 
 die() { echo "run-agent: $*" >&2; exit 2; }
 
-[ $# -ge 2 ] || die "usage: run-agent.sh <triage|fix|optimize> <findings.json> [--out <file>]"
+[ $# -ge 2 ] || die "usage: run-agent.sh <triage|fix|optimize|fix-all> <findings.json> [--out <file>]"
 
 STAGE="$1"; FINDINGS="$2"; shift 2
 OUT=""
@@ -40,8 +40,8 @@ while [ $# -gt 0 ]; do
 done
 
 case "$STAGE" in
-  triage|fix|optimize) ;;
-  *) die "invalid stage: $STAGE (expected triage|fix|optimize)" ;;
+  triage|fix|optimize|fix-all) ;;
+  *) die "invalid stage: $STAGE (expected triage|fix|optimize|fix-all)" ;;
 esac
 
 PROMPT_FILE="$PROMPT_DIR/$STAGE.md"
