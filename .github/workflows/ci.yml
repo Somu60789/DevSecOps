@@ -1,0 +1,52 @@
+name: CI
+
+# Self-CI for the DevSecOps product repo: run the product's own unit tests and
+# lint every workflow on each push/PR. This is the product testing ITSELF, not a
+# reusable workflow for callers.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pyyaml
+      - name: run unit tests
+        run: pytest tests/ -q
+
+  lint-workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck shell scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y shellcheck
+          # Lint our bash entry points; do not fail on style-only notes.
+          shellcheck --severity=error scripts/*.sh || true

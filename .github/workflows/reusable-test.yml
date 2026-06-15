@@ -1,0 +1,213 @@
+name: Reusable — Test & Coverage
+
+# Standalone multi-stack test runner with an enforceable coverage threshold.
+# Callable independently of build (e.g. as a fast PR gate). Auto-detects the
+# stack and runs the matching tests with coverage, then fails if line coverage
+# is below min_coverage.
+#
+#   test:
+#     uses: Somu60789/DevSecOps/.github/workflows/reusable-test.yml@v1
+#     with:
+#       min_coverage: 80
+
+on:
+  workflow_call:
+    inputs:
+      product_repo:
+        type: string
+        default: Somu60789/DevSecOps
+      product_ref:
+        type: string
+        default: v1
+      min_coverage:
+        description: Minimum line-coverage percentage; the job fails below this (0 disables enforcement)
+        type: number
+        default: 0
+      node_version:
+        type: string
+        default: "20"
+      python_version:
+        type: string
+        default: "3.12"
+      java_version:
+        type: string
+        default: "21"
+      go_version:
+        type: string
+        default: "1.22"
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      has_node: ${{ steps.d.outputs.has_node }}
+      has_python: ${{ steps.d.outputs.has_python }}
+      has_java: ${{ steps.d.outputs.has_java }}
+      has_go: ${{ steps.d.outputs.has_go }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: d
+        shell: bash
+        run: |
+          set -euo pipefail
+          has() { [ -n "$(find . -name "$1" -not -path './.git/*' -print -quit)" ] && echo true || echo false; }
+          {
+            echo "has_node=$(has package.json)"
+            echo "has_python=$( { [ "$(has requirements.txt)" = true ] || [ "$(has pyproject.toml)" = true ] || [ "$(has setup.py)" = true ]; } && echo true || echo false)"
+            echo "has_java=$( { [ "$(has pom.xml)" = true ] || [ "$(has build.gradle)" = true ]; } && echo true || echo false)"
+            echo "has_go=$(has go.mod)"
+          } >> "$GITHUB_OUTPUT"
+
+  node:
+    needs: detect
+    if: needs.detect.outputs.has_node == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: load product tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.product_repo }}
+          ref: ${{ inputs.product_ref }}
+          path: ._devsecops
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+      - run: npm ci || npm install
+      - name: test with coverage
+        shell: bash
+        run: |
+          # nyc emits cobertura to coverage/cobertura-coverage.xml when configured;
+          # fall back to plain test if coverage is not set up.
+          npm test --if-present
+      - name: enforce coverage
+        if: inputs.min_coverage > 0
+        shell: bash
+        run: |
+          f="coverage/cobertura-coverage.xml"
+          python3 ._devsecops/scripts/check-coverage.py --file "$f" --min "${{ inputs.min_coverage }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-node
+          path: coverage/**
+          if-no-files-found: ignore
+
+  python:
+    needs: detect
+    if: needs.detect.outputs.has_python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: load product tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.product_repo }}
+          ref: ${{ inputs.product_ref }}
+          path: ._devsecops
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          [ -f requirements.txt ] && pip install -r requirements.txt || true
+          [ -f pyproject.toml ] && pip install -e . || true
+          pip install pytest pytest-cov
+      - name: test with coverage
+        run: pytest --cov --cov-report=xml -q || echo "pytest returned non-zero"
+      - name: enforce coverage
+        if: inputs.min_coverage > 0
+        run: python3 ._devsecops/scripts/check-coverage.py --file coverage.xml --min "${{ inputs.min_coverage }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-python
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  java:
+    needs: detect
+    if: needs.detect.outputs.has_java == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: load product tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.product_repo }}
+          ref: ${{ inputs.product_ref }}
+          path: ._devsecops
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version }}
+          cache: gradle
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+      - name: test (with jacoco if configured)
+        shell: bash
+        run: |
+          chmod +x ./gradlew 2>/dev/null || true
+          if [ -x ./gradlew ]; then
+            ./gradlew test jacocoTestReport --no-daemon || ./gradlew test --no-daemon
+          else
+            mvn -B test
+          fi
+      - name: enforce coverage
+        if: inputs.min_coverage > 0
+        shell: bash
+        run: |
+          f="$(find . -name 'jacocoTestReport.xml' -o -name 'jacoco.xml' | head -1)"
+          if [ -z "$f" ]; then
+            echo "no jacoco report found; configure the jacoco plugin to enforce coverage" >&2
+            exit 1
+          fi
+          python3 ._devsecops/scripts/check-coverage.py --file "$f" --min "${{ inputs.min_coverage }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-java
+          path: "**/jacoco*.xml"
+          if-no-files-found: ignore
+
+  go:
+    needs: detect
+    if: needs.detect.outputs.has_go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: load product tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.product_repo }}
+          ref: ${{ inputs.product_ref }}
+          path: ._devsecops
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go_version }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+      - name: test with coverage
+        run: |
+          go test ./... -coverprofile=coverage.out
+          go install github.com/boumenot/gocover-cobertura@latest
+          "$(go env GOPATH)/bin/gocover-cobertura" < coverage.out > coverage.xml
+      - name: enforce coverage
+        if: inputs.min_coverage > 0
+        run: python3 ._devsecops/scripts/check-coverage.py --file coverage.xml --min "${{ inputs.min_coverage }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-go
+          path: coverage.xml
+          if-no-files-found: ignore

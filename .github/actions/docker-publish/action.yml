@@ -1,0 +1,180 @@
+name: Docker build & publish (multi-registry)
+description: >-
+  Build a Docker image and publish it to a chosen cloud registry (AWS ECR,
+  GitHub GHCR, Google Artifact Registry, Azure ACR, or Docker Hub), and/or save
+  it as a workflow artifact. Tags with both the commit SHA and an optional
+  semver/extra tag. One place, every registry.
+
+inputs:
+  registry:
+    description: "Target registry: ecr | ghcr | gcp | acr | dockerhub | none"
+    required: false
+    default: ghcr
+  image_name:
+    description: Image repository name (without registry host). Defaults to the repo name.
+    required: false
+    default: ""
+  context:
+    description: Docker build context
+    required: false
+    default: "."
+  dockerfile:
+    description: Path to the Dockerfile
+    required: false
+    default: Dockerfile
+  extra_tag:
+    description: Additional tag to apply (e.g. a semver like v1.2.3 or "latest"). SHA is always applied.
+    required: false
+    default: ""
+  push:
+    description: Push to the registry (false = build only)
+    required: false
+    default: "true"
+  save_artifact:
+    description: Also save the built image as a workflow artifact (docker save)
+    required: false
+    default: "false"
+  # --- registry coordinates (only the ones for the chosen registry are needed) ---
+  registry_host:
+    description: "Registry host. ecr: <acct>.dkr.ecr.<region>.amazonaws.com | gcp: <region>-docker.pkg.dev/<project>/<repo> | acr: <name>.azurecr.io | dockerhub: docker.io/<namespace>"
+    required: false
+    default: ""
+  aws_region:
+    description: AWS region (ecr)
+    required: false
+    default: us-east-1
+  # --- registry credentials (pass via secrets from the caller) ---
+  username:
+    description: Registry username (ghcr/acr/dockerhub)
+    required: false
+    default: ""
+  password:
+    description: Registry password/token (ghcr token, acr password, dockerhub token)
+    required: false
+    default: ""
+  gcp_credentials_json:
+    description: GCP service-account JSON key (gcp)
+    required: false
+    default: ""
+
+outputs:
+  image_ref:
+    description: Fully-qualified image reference pushed/built (host/name:sha)
+    value: ${{ steps.meta.outputs.image_ref }}
+
+runs:
+  using: composite
+  steps:
+    - name: resolve image metadata
+      id: meta
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        IMAGE_NAME: ${{ inputs.image_name }}
+        REGISTRY_HOST: ${{ inputs.registry_host }}
+        REPO_NAME: ${{ github.event.repository.name }}
+        REPO_OWNER: ${{ github.repository_owner }}
+        SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        name="${IMAGE_NAME:-$REPO_NAME}"
+        case "$REGISTRY" in
+          ghcr) host="ghcr.io/${REPO_OWNER}" ;;
+          ecr|gcp|acr|dockerhub) host="$REGISTRY_HOST" ;;
+          none) host="local" ;;
+          *) echo "unknown registry: $REGISTRY" >&2; exit 1 ;;
+        esac
+        if [ "$REGISTRY" != "none" ] && [ "$REGISTRY" != "ghcr" ] && [ -z "$host" ]; then
+          echo "registry_host is required for registry '$REGISTRY'" >&2; exit 1
+        fi
+        ref="${host}/${name}"
+        {
+          echo "host=$host"
+          echo "name=$name"
+          echo "image_ref=${ref}:${SHA}"
+          echo "ref_base=$ref"
+        } >> "$GITHUB_OUTPUT"
+
+    # --- registry logins (each runs only for the selected registry) ---
+    - name: login to ECR
+      if: inputs.registry == 'ecr' && inputs.push == 'true'
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: login to GHCR
+      if: inputs.registry == 'ghcr' && inputs.push == 'true'
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ inputs.username || github.actor }}
+        password: ${{ inputs.password }}
+
+    - name: authenticate to Google Cloud
+      if: inputs.registry == 'gcp' && inputs.push == 'true'
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ inputs.gcp_credentials_json }}
+    - name: configure gcloud docker auth
+      if: inputs.registry == 'gcp' && inputs.push == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        host="$(echo '${{ steps.meta.outputs.host }}' | cut -d/ -f1)"
+        gcloud auth configure-docker "$host" --quiet
+
+    - name: login to ACR
+      if: inputs.registry == 'acr' && inputs.push == 'true'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ inputs.registry_host }}
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+
+    - name: login to Docker Hub
+      if: inputs.registry == 'dockerhub' && inputs.push == 'true'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+
+    - name: compute tags
+      id: tags
+      shell: bash
+      env:
+        REF_BASE: ${{ steps.meta.outputs.ref_base }}
+        SHA: ${{ github.sha }}
+        EXTRA: ${{ inputs.extra_tag }}
+      run: |
+        set -euo pipefail
+        tags="${REF_BASE}:${SHA}"
+        [ -n "$EXTRA" ] && tags="${tags},${REF_BASE}:${EXTRA}"
+        echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+    - name: set up Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: build and push
+      uses: docker/build-push-action@v6
+      with:
+        context: ${{ inputs.context }}
+        file: ${{ inputs.context }}/${{ inputs.dockerfile }}
+        push: ${{ inputs.push == 'true' && inputs.registry != 'none' }}
+        tags: ${{ steps.tags.outputs.tags }}
+        load: ${{ inputs.save_artifact == 'true' }}
+
+    - name: save image as workflow artifact
+      if: inputs.save_artifact == 'true'
+      shell: bash
+      env:
+        IMAGE_REF: ${{ steps.meta.outputs.image_ref }}
+      run: |
+        set -euo pipefail
+        safe="$(echo "$IMAGE_REF" | tr '/:' '__')"
+        docker save "$IMAGE_REF" -o "image-${safe}.tar"
+        echo "ARTIFACT_PATH=image-${safe}.tar" >> "$GITHUB_ENV"
+    - name: upload image artifact
+      if: inputs.save_artifact == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: docker-image
+        path: ${{ env.ARTIFACT_PATH }}
+        if-no-files-found: error
