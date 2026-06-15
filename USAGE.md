@@ -32,13 +32,39 @@ Every capability is also a standalone reusable workflow — pick only what you n
 | Workflow | Purpose | Trigger context |
 |----------|---------|-----------------|
 | `reusable-devsecops.yml` | Everything, with per-stage toggles | push / PR / schedule |
-| `reusable-build.yml` | Multi-stack build + test (node/python/java/go) + container | any |
+| `reusable-build.yml` | Generic multi-stack build + test (node/python/java/go) + container | any |
+| `reusable-build-gradle.yml` | Java/Gradle build + test + Docker publish (multi-registry) | any |
+| `reusable-build-node.yml` | Node build + test + Docker publish (multi-registry) | any |
+| `reusable-test.yml` | Multi-stack tests with an **enforceable coverage threshold** | PR / any |
 | `reusable-security.yml` | Scanners → one `findings.json` | any |
 | `reusable-agent-fix.yml` | Triage + safe auto-fix on the PR branch | pull_request |
 | `reusable-docs.yml` | Docs-on-PR + nightly drift sweep | PR / schedule |
 | `reusable-review.yml` | Consolidated PR review comment | pull_request |
 | `reusable-checkmarx-remediate.yml` | Checkmarx scan → remediation PR | schedule / manual |
 | `reusable-deploy.yml` | Gated deploy behind an Environment approval | tag / manual |
+
+### Build & publish to any registry
+
+`reusable-build-gradle.yml` and `reusable-build-node.yml` build, test, then build
+and publish a Docker image via the shared `docker-publish` composite action. The
+`registry` input selects the target — `ecr` | `ghcr` | `gcp` | `acr` |
+`dockerhub` | `none` — and `save_image_artifact: true` also uploads the image as
+a workflow artifact. Images are tagged with the commit SHA plus any `extra_tag`
+(e.g. a semver).
+
+### Standalone tests with coverage enforcement
+
+`reusable-test.yml` runs tests for the detected stack and, when
+`min_coverage` > 0, **fails the job** if line coverage is below the threshold
+(via `scripts/check-coverage.py`, which reads Cobertura or JaCoCo reports).
+
+```yaml
+jobs:
+  test:
+    uses: Somu60789/DevSecOps/.github/workflows/reusable-test.yml@v1
+    with:
+      min_coverage: 80
+```
 
 Example — security + review only:
 
@@ -86,3 +112,32 @@ is autonomous.
 Reusable workflows run in **your** repo's context, so each one checks out this
 product repo (at `product_ref`) into `._devsecops/` to get the scripts and the
 Checkmarx composite action. Nothing is vendored into your repo.
+
+## Jenkins integration (on-prem Checkmarx)
+
+For estates already running Checkmarx through Jenkins (on-prem CxSAST), the same
+agent loop is available as a shared-library step without moving to GitHub
+Actions — see [`jenkins/`](jenkins/):
+
+- `jenkins/vars/remediateCheckmarx.groovy` — picks up after a scan: fetches the
+  CxSAST **XML** report over the REST API, normalizes it with
+  `collect-findings.py`, runs `run-agent.sh fix-all`, and raises a remediation
+  PR on the code repo (never pushes to the default branch).
+- `jenkins/examples/remediate-checkmarx.Jenkinsfile` — a drop-in job definition.
+
+`collect-findings.py` ingests **both** Checkmarx formats: SARIF (from the CxFlow
+GitHub Action path) and CxSAST XML (from the on-prem REST report path).
+
+## AI runtime adapters
+
+`AGENT_CMD` can point at any command that reads a prompt on stdin and writes the
+response to stdout. A ready-made AWS Bedrock + Claude adapter ships at
+`scripts/agents/bedrock-agent.py`:
+
+```bash
+export AGENT_CMD="python3 scripts/agents/bedrock-agent.py"
+export MODEL_ID="us.anthropic.claude-sonnet-4-6"   # default
+export AWS_REGION="us-east-1"                       # default
+```
+
+AWS credentials come from the standard chain (env / instance role / profile).

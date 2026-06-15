@@ -20,6 +20,7 @@ import argparse
 import hashlib
 import json
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 SCHEMA_VERSION = "1"
@@ -120,6 +121,33 @@ def _parse_generic_list(data, tool, category):
     return out
 
 
+def _parse_checkmarx_xml(text, tool, category):
+    """Yield findings from a Checkmarx CxSAST XML report.
+
+    On-prem CxSAST emits XML (not SARIF). Shape:
+        <CxXMLResults><Query name=.. Severity=..><Result FileName=.. Line=..
+        Severity=.. /></Query></CxXMLResults>
+    A non-CxXMLResults root yields nothing (rather than raising).
+    """
+    out = []
+    root = ET.fromstring(text)
+    if root.tag != "CxXMLResults":
+        return out
+    for query in root.findall("Query"):
+        rule_id = query.get("name", "")
+        query_sev = query.get("Severity")
+        for res in query.findall("Result"):
+            sev = normalize_severity(res.get("Severity") or query_sev)
+            file = res.get("FileName", "")
+            line_raw = res.get("Line")
+            line = int(line_raw) if line_raw and line_raw.isdigit() else None
+            message = f"{rule_id} ({res.get('Status', '')})".strip()
+            out.append(_make_finding(
+                tool, category, sev, file, line, rule_id, message,
+                {k: v for k, v in res.attrib.items()}))
+    return out
+
+
 def _dispatch(tool, category, data):
     if tool == "gitleaks":
         return _parse_gitleaks(data, tool, category)
@@ -141,15 +169,27 @@ def collect(inputs, generated_at):
         tool, category, path = desc["tool"], desc["category"], desc["path"]
         try:
             raw_text = Path(path).read_text()
-            data = json.loads(raw_text) if raw_text.strip() else []
         except FileNotFoundError:
             scanner_errors.append({"tool": tool, "error": "output not found", "path": path})
             continue
-        except (json.JSONDecodeError, OSError) as exc:
+        except OSError as exc:
             scanner_errors.append({"tool": tool, "error": str(exc), "path": path})
             continue
 
-        for f in _dispatch(tool, category, data):
+        # Checkmarx CxSAST reports are XML, not JSON; route them to the XML parser.
+        stripped = raw_text.lstrip()
+        is_xml = stripped.startswith("<?xml") or stripped.startswith("<")
+        try:
+            if is_xml:
+                produced = _parse_checkmarx_xml(raw_text, tool, category)
+            else:
+                data = json.loads(raw_text) if raw_text.strip() else []
+                produced = _dispatch(tool, category, data)
+        except (json.JSONDecodeError, ET.ParseError) as exc:
+            scanner_errors.append({"tool": tool, "error": str(exc), "path": path})
+            continue
+
+        for f in produced:
             if f["id"] in seen_ids:
                 continue
             seen_ids.add(f["id"])

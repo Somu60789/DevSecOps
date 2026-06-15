@@ -1,0 +1,159 @@
+name: Reusable — Node Build & Publish
+
+# Node install + build + test, then build & publish a Docker image to any cloud
+# registry (and/or save it as a workflow artifact).
+#
+#   build:
+#     uses: Somu60789/DevSecOps/.github/workflows/reusable-build-node.yml@v1
+#     secrets: inherit
+#     with:
+#       node_version: "20"
+#       registry: ghcr
+
+on:
+  workflow_call:
+    inputs:
+      product_repo:
+        type: string
+        default: Somu60789/DevSecOps
+      product_ref:
+        type: string
+        default: v1
+      node_version:
+        type: string
+        default: "20"
+      npm_registry:
+        description: Custom npm registry URL (optional)
+        type: string
+        default: ""
+      build_script:
+        description: npm script to build (skipped if absent)
+        type: string
+        default: "build"
+      test_script:
+        description: npm script to test (skipped if absent)
+        type: string
+        default: "test"
+      run_tests:
+        type: boolean
+        default: true
+      # --- image publish ---
+      build_image:
+        type: boolean
+        default: true
+      registry:
+        description: "ecr | ghcr | gcp | acr | dockerhub | none"
+        type: string
+        default: ghcr
+      registry_host:
+        type: string
+        default: ""
+      image_name:
+        type: string
+        default: ""
+      extra_tag:
+        type: string
+        default: ""
+      push_image:
+        type: boolean
+        default: true
+      save_image_artifact:
+        type: boolean
+        default: false
+      aws_region:
+        type: string
+        default: us-east-1
+    secrets:
+      REGISTRY_USERNAME:
+        required: false
+      REGISTRY_PASSWORD:
+        required: false
+      GCP_CREDENTIALS_JSON:
+        required: false
+      AWS_ACCESS_KEY_ID:
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        required: false
+      AWS_ROLE_ARN:
+        required: false
+      NPM_TOKEN:
+        required: false
+    outputs:
+      image_ref:
+        description: Published image reference
+        value: ${{ jobs.build.outputs.image_ref }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_ref: ${{ steps.publish.outputs.image_ref }}
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          registry-url: ${{ inputs.npm_registry || 'https://registry.npmjs.org' }}
+          cache: npm
+      - name: install
+        shell: bash
+        run: npm ci || npm install
+      - name: build
+        shell: bash
+        env:
+          BUILD_SCRIPT: ${{ inputs.build_script }}
+        run: npm run "$BUILD_SCRIPT" --if-present
+      - name: test
+        if: inputs.run_tests
+        shell: bash
+        env:
+          TEST_SCRIPT: ${{ inputs.test_script }}
+        run: npm run "$TEST_SCRIPT" --if-present
+      - name: upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-build-artifacts
+          path: |
+            dist/**
+            build/**
+            coverage/**
+          if-no-files-found: ignore
+
+      - name: load product tooling
+        if: inputs.build_image
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.product_repo }}
+          ref: ${{ inputs.product_ref }}
+          path: ._devsecops
+      - name: configure AWS credentials
+        if: inputs.build_image && inputs.push_image && inputs.registry == 'ecr'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: build & publish image
+        id: publish
+        if: inputs.build_image
+        uses: ./._devsecops/.github/actions/docker-publish
+        with:
+          registry: ${{ inputs.registry }}
+          registry_host: ${{ inputs.registry_host }}
+          image_name: ${{ inputs.image_name }}
+          extra_tag: ${{ inputs.extra_tag }}
+          push: ${{ inputs.push_image }}
+          save_artifact: ${{ inputs.save_image_artifact }}
+          aws_region: ${{ inputs.aws_region }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+          gcp_credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
