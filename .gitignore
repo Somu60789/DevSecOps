@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Scanner outputs (generated in CI, never committed)
+findings.json
+*.sarif
+gitleaks.json
+jscpd.json
+lizard.xml
+vulture.txt
+artifacts/
+jscpd-report/
+
+# Secrets — never commit
+.env
+.env.*
+*.pem
