@@ -4,9 +4,10 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# Scanner / agent outputs (generated in CI, never committed)
+
 findings.json
 agent-*.json
+
 *.sarif
 gitleaks.json
 jscpd.json
