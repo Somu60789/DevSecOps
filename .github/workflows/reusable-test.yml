@@ -48,7 +48,7 @@ jobs:
       has_java: ${{ steps.d.outputs.has_java }}
       has_go: ${{ steps.d.outputs.has_go }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: d
         shell: bash
         run: |
@@ -66,18 +66,18 @@ jobs:
     if: needs.detect.outputs.has_node == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: load product tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
           path: ._devsecops
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node_version }}
           cache: npm
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python_version }}
       - run: npm ci || npm install
@@ -93,7 +93,7 @@ jobs:
         run: |
           f="coverage/cobertura-coverage.xml"
           python3 ._devsecops/scripts/check-coverage.py --file "$f" --min "${{ inputs.min_coverage }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-node
@@ -105,14 +105,14 @@ jobs:
     if: needs.detect.outputs.has_python == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: load product tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
           path: ._devsecops
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python_version }}
       - name: install
@@ -126,7 +126,7 @@ jobs:
       - name: enforce coverage
         if: inputs.min_coverage > 0
         run: python3 ._devsecops/scripts/check-coverage.py --file coverage.xml --min "${{ inputs.min_coverage }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-python
@@ -138,19 +138,19 @@ jobs:
     if: needs.detect.outputs.has_java == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: load product tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
           path: ._devsecops
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ inputs.java_version }}
           cache: gradle
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python_version }}
       - name: test (with jacoco if configured)
@@ -172,7 +172,7 @@ jobs:
             exit 1
           fi
           python3 ._devsecops/scripts/check-coverage.py --file "$f" --min "${{ inputs.min_coverage }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-java
@@ -184,17 +184,17 @@ jobs:
     if: needs.detect.outputs.has_go == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: load product tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
           path: ._devsecops
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ inputs.go_version }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python_version }}
       - name: test with coverage
@@ -205,7 +205,7 @@ jobs:
       - name: enforce coverage
         if: inputs.min_coverage > 0
         run: python3 ._devsecops/scripts/check-coverage.py --file coverage.xml --min "${{ inputs.min_coverage }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-go

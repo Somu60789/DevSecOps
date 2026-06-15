@@ -56,16 +56,16 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: detect --report-format json --report-path gitleaks.json --no-git --redact
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scan-secrets
@@ -76,7 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: semgrep
         uses: semgrep/semgrep-action@v1
         with:
@@ -86,12 +86,12 @@ jobs:
         if: always()
         shell: bash
         run: test -f semgrep.sarif && cp semgrep.sarif sast.sarif || echo "{}" > sast.sarif
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: sast.sarif
           category: semgrep
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scan-sast
@@ -103,9 +103,9 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: load product tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
@@ -130,12 +130,12 @@ jobs:
         if: always()
         shell: bash
         run: test -f checkmarx.sarif || echo '{"runs":[]}' > checkmarx.sarif
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: checkmarx.sarif
           category: checkmarx
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scan-checkmarx
@@ -146,15 +146,15 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: trivy filesystem (SCA + license + secrets)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           format: sarif
           output: trivy-fs.sarif
           scanners: vuln,license,secret
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-fs.sarif
@@ -165,7 +165,7 @@ jobs:
           output_format: sarif
           output_file_path: checkov.sarif
         continue-on-error: true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scan-sca-iac
@@ -178,8 +178,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: complexity (lizard)
@@ -192,7 +192,7 @@ jobs:
         run: |
           npx --yes jscpd --silent --reporters json --output ./jscpd-report . || true
           test -f ./jscpd-report/jscpd-report.json && cp ./jscpd-report/jscpd-report.json jscpd.json || echo "{}" > jscpd.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scan-clean-code
@@ -209,14 +209,14 @@ jobs:
       has_findings: ${{ steps.normalize.outputs.has_findings }}
     steps:
       - name: load product tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: normalize findings
@@ -235,7 +235,7 @@ jobs:
           python3 scripts/collect-findings.py --generated-at "$gen_at" --out findings.json --inputs "${inputs[@]}"
           count="$(python3 -c 'import json; print(len(json.load(open("findings.json"))["findings"]))')"
           echo "has_findings=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.findings_artifact }}
           path: findings.json

@@ -87,8 +87,8 @@ jobs:
     outputs:
       image_ref: ${{ steps.publish.outputs.image_ref }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ inputs.java_version }}
@@ -112,7 +112,7 @@ jobs:
           fi
       - name: upload build artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gradle-build-artifacts
           path: |
@@ -122,14 +122,14 @@ jobs:
 
       - name: load product tooling
         if: inputs.build_image
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
           path: ._devsecops
       - name: configure AWS credentials
         if: inputs.build_image && inputs.push_image && inputs.registry == 'ecr'
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ inputs.aws_region }}
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }} # OIDC role; or use the access keys below
