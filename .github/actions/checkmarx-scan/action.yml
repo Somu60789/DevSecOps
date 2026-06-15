@@ -1,0 +1,62 @@
+name: Checkmarx SAST scan (CxFlow)
+description: >-
+  Run a Checkmarx SAST scan against the checked-out source via CxFlow (on-prem
+  CxSAST) and write a SARIF report. Used by both the PR scanner pipeline and the
+  remediation workflow so the CxFlow invocation lives in one place.
+
+inputs:
+  cx-server-url:
+    description: CxSAST server URL
+    required: true
+  cx-username:
+    description: CxSAST username
+    required: true
+  cx-password:
+    description: CxSAST password
+    required: true
+  cx-team:
+    description: CxSAST team
+    required: true
+  project-name:
+    description: Checkmarx project name
+    required: true
+  output-file:
+    description: Path to write the SARIF report
+    required: false
+    default: checkmarx.sarif
+
+outputs:
+  sarif-file:
+    description: Path of the SARIF report produced
+    value: ${{ inputs.output-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run CxFlow
+      shell: bash
+      env:
+        CX_SERVER_URL: ${{ inputs.cx-server-url }}
+        CX_USERNAME: ${{ inputs.cx-username }}
+        CX_PASSWORD: ${{ inputs.cx-password }}
+        CX_TEAM: ${{ inputs.cx-team }}
+        CX_PROJECT: ${{ inputs.project-name }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+      run: |
+        set -euo pipefail
+        docker run --rm \
+          -v "$PWD:/code" \
+          -e CX_SERVER_URL -e CX_USERNAME -e CX_PASSWORD -e CX_TEAM \
+          checkmarx/cx-flow:latest \
+          --scan \
+          --cx-server="$CX_SERVER_URL" \
+          --cx-user="$CX_USERNAME" \
+          --cx-password="$CX_PASSWORD" \
+          --cx-team="$CX_TEAM" \
+          --cx-project="$CX_PROJECT" \
+          --app="$CX_PROJECT" \
+          --f=/code \
+          --output-type=SARIF \
+          --filename="/code/$OUTPUT_FILE"
+        # CxFlow can exit non-zero when it finds issues; that is expected here.
+        test -f "$OUTPUT_FILE" || echo '{"runs":[]}' > "$OUTPUT_FILE"

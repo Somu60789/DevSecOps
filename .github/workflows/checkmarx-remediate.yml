@@ -35,32 +35,17 @@ jobs:
           fetch-depth: 0
 
       # CxFlow drives the on-prem CxSAST server and writes a SARIF report.
-      # Credentials come from repo secrets; nothing is hardcoded here.
-      - name: Checkmarx SAST scan (CxFlow)
-        env:
-          CX_SERVER_URL: ${{ secrets.CX_SERVER_URL }}
-          CX_USERNAME: ${{ secrets.CX_USERNAME }}
-          CX_PASSWORD: ${{ secrets.CX_PASSWORD }}
-          CX_TEAM: ${{ secrets.CX_TEAM }}
-          REPO_NAME: ${{ github.event.repository.name }}
-        run: |
-          set -euo pipefail
-          docker run --rm \
-            -v "$PWD:/code" \
-            -e CX_SERVER_URL -e CX_USERNAME -e CX_PASSWORD -e CX_TEAM \
-            checkmarx/cx-flow:latest \
-            --scan \
-            --cx-server="$CX_SERVER_URL" \
-            --cx-user="$CX_USERNAME" \
-            --cx-password="$CX_PASSWORD" \
-            --cx-team="$CX_TEAM" \
-            --cx-project="$REPO_NAME" \
-            --app="$REPO_NAME" \
-            --f=/code \
-            --output-type=SARIF \
-            --filename=/code/checkmarx.sarif
-          # CxFlow can exit non-zero when it finds issues; that is expected here.
-          test -f checkmarx.sarif || echo '{"runs":[]}' > checkmarx.sarif
+      # Shared with the PR scanner pipeline via a composite action so the CxFlow
+      # invocation lives in exactly one place. Credentials come from repo secrets.
+      - name: Checkmarx SAST scan
+        uses: ./.github/actions/checkmarx-scan
+        with:
+          cx-server-url: ${{ secrets.CX_SERVER_URL }}
+          cx-username: ${{ secrets.CX_USERNAME }}
+          cx-password: ${{ secrets.CX_PASSWORD }}
+          cx-team: ${{ secrets.CX_TEAM }}
+          project-name: ${{ github.event.repository.name }}
+          output-file: checkmarx.sarif
 
       - uses: actions/setup-python@v5
         with:
