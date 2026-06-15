@@ -1,0 +1,94 @@
+name: AI Agent (triage / fix / optimize)
+
+# Stages 2-4 of the agent loop. Consumes the findings.json produced by
+# devsecops.yml, runs triage -> safe-auto-fix -> optimize, commits only
+# unambiguously-safe fixes to the PR branch, and uploads stage outputs as
+# artifacts for the PR-review bot (Stage 6). Gated: never pushes to a default
+# branch, never merges, never deploys.
+
+on:
+  workflow_run:
+    workflows: ["DevSecOps Scanners"]
+    types: [completed]
+
+permissions:
+  contents: write # commit safe fixes to the PR branch
+  pull-requests: write
+
+concurrency:
+  group: ai-agent-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  agent:
+    # Only act on PR branches; never on the default branch.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_branch != 'master' &&
+      github.event.workflow_run.head_branch != 'main'
+    runs-on: ubuntu-latest
+    env:
+      # Provider-agnostic agent runtime. Configure in repo settings; if unset the
+      # stages degrade to fallback markers and the review bot uses raw findings.
+      AGENT_CMD: ${{ vars.AGENT_CMD }}
+      AGENT_API_KEY: ${{ secrets.AGENT_API_KEY }}
+      BASE_REF: origin/${{ github.event.workflow_run.head_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: download findings artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: findings
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: .
+
+      - name: stage 2 — triage
+        id: triage
+        continue-on-error: true
+        run: bash scripts/run-agent.sh triage findings.json --out agent-triage.json
+
+      - name: stage 3 — safe auto-fix
+        id: fix
+        if: steps.triage.outcome == 'success'
+        continue-on-error: true
+        run: bash scripts/run-agent.sh fix findings.json --out agent-fix.json
+
+      - name: stage 4 — optimize (suggestion-only)
+        id: optimize
+        continue-on-error: true
+        run: bash scripts/run-agent.sh optimize findings.json --out agent-optimize.json
+
+      - name: commit safe fixes to PR branch
+        if: steps.fix.outcome == 'success'
+        run: |
+          set -euo pipefail
+          git config user.name "devsecops-bot"
+          git config user.email "devsecops-bot@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "no safe fixes to commit"
+            exit 0
+          fi
+          git add -A
+          git commit -m "fix: apply unambiguously-safe scanner fixes"
+          git push origin "HEAD:${{ github.event.workflow_run.head_branch }}"
+
+      - name: upload agent outputs for review bot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-outputs
+          path: |
+            findings.json
+            agent-triage.json
+            agent-fix.json
+            agent-optimize.json
+          if-no-files-found: ignore
