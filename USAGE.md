@@ -86,3 +86,32 @@ is autonomous.
 Reusable workflows run in **your** repo's context, so each one checks out this
 product repo (at `product_ref`) into `._devsecops/` to get the scripts and the
 Checkmarx composite action. Nothing is vendored into your repo.
+
+## Jenkins integration (on-prem Checkmarx)
+
+For estates already running Checkmarx through Jenkins (on-prem CxSAST), the same
+agent loop is available as a shared-library step without moving to GitHub
+Actions — see [`jenkins/`](jenkins/):
+
+- `jenkins/vars/remediateCheckmarx.groovy` — picks up after a scan: fetches the
+  CxSAST **XML** report over the REST API, normalizes it with
+  `collect-findings.py`, runs `run-agent.sh fix-all`, and raises a remediation
+  PR on the code repo (never pushes to the default branch).
+- `jenkins/examples/remediate-checkmarx.Jenkinsfile` — a drop-in job definition.
+
+`collect-findings.py` ingests **both** Checkmarx formats: SARIF (from the CxFlow
+GitHub Action path) and CxSAST XML (from the on-prem REST report path).
+
+## AI runtime adapters
+
+`AGENT_CMD` can point at any command that reads a prompt on stdin and writes the
+response to stdout. A ready-made AWS Bedrock + Claude adapter ships at
+`scripts/agents/bedrock-agent.py`:
+
+```bash
+export AGENT_CMD="python3 scripts/agents/bedrock-agent.py"
+export MODEL_ID="us.anthropic.claude-sonnet-4-6"   # default
+export AWS_REGION="us-east-1"                       # default
+```
+
+AWS credentials come from the standard chain (env / instance role / profile).

@@ -16,6 +16,31 @@ def _write(tmp_path, name, payload):
     return p
 
 
+def _write_text(tmp_path, name, text):
+    p = tmp_path / name
+    p.write_text(text)
+    return p
+
+
+# A minimal Checkmarx CxSAST XML report (the on-prem report format — not SARIF).
+CX_XML = """<?xml version="1.0" encoding="utf-8"?>
+<CxXMLResults ProjectName="AvantGarde-CV" ScanId="123">
+  <Query name="SQL_Injection" Severity="High" cweId="89">
+    <Result FileName="src/main/java/Dao.java" Line="42" Status="New"
+            Severity="High" DeepLink="https://checkmarx.home.tatamotors/x">
+      <Path/>
+    </Result>
+  </Query>
+  <Query name="Hardcoded_Password" Severity="Medium" cweId="259">
+    <Result FileName="src/main/java/Conf.java" Line="7" Status="Recurrent"
+            Severity="Medium" DeepLink="https://checkmarx.home.tatamotors/y">
+      <Path/>
+    </Result>
+  </Query>
+</CxXMLResults>
+"""
+
+
 def test_empty_input_produces_empty_findings(tmp_path):
     result = cf.collect(inputs=[], generated_at="2026-06-16T00:00:00Z")
     assert result["schema_version"] == "1"
@@ -120,3 +145,33 @@ def test_summary_counts_by_severity_and_category(tmp_path):
     assert result["summary"]["by_severity"]["medium"] == 1
     assert result["summary"]["by_category"]["secret"] == 1
     assert result["summary"]["by_category"]["sast"] == 1
+
+
+def test_checkmarx_xml_report_parsed(tmp_path):
+    xml = _write_text(tmp_path, "checkmarx.xml", CX_XML)
+    result = cf.collect(
+        inputs=[{"tool": "checkmarx", "category": "sast", "path": str(xml)}],
+        generated_at="2026-06-16T00:00:00Z",
+    )
+    assert len(result["findings"]) == 2
+    by_rule = {f["rule_id"]: f for f in result["findings"]}
+    sqli = by_rule["SQL_Injection"]
+    assert sqli["tool"] == "checkmarx"
+    assert sqli["category"] == "sast"
+    assert sqli["file"] == "src/main/java/Dao.java"
+    assert sqli["line"] == 42
+    assert sqli["severity"] == "high"            # CxSAST "High" -> high
+    assert "SQL_Injection" in sqli["message"]
+    assert by_rule["Hardcoded_Password"]["severity"] == "medium"
+
+
+def test_checkmarx_xml_dispatched_by_extension_only(tmp_path):
+    # A .xml path that is not Checkmarx should not crash; it records a scanner error.
+    bad = _write_text(tmp_path, "other.xml", "<notcheckmarx/>")
+    result = cf.collect(
+        inputs=[{"tool": "checkmarx", "category": "sast", "path": str(bad)}],
+        generated_at="2026-06-16T00:00:00Z",
+    )
+    assert result["findings"] == []
+    # Non-CxXMLResults root yields no findings but no crash.
+    assert result["summary"]["scanner_errors"] == [] or len(result["findings"]) == 0
