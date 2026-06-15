@@ -1,0 +1,180 @@
+name: Checkmarx Scan and Remediate
+
+# Runs a Checkmarx SAST (on-prem, via CxFlow) scan against the default branch,
+# normalizes the report through collect-findings.py, then has the agent
+# remediate every finding and open a remediation pull request. The scan targets
+# the default branch but the agent NEVER pushes there: all fixes land on a
+# bot/code-fix-<date> branch behind a PR that a human reviews and merges.
+
+on:
+  schedule:
+    - cron: "0 1 * * *" # nightly scan of the default branch
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to scan (defaults to the default branch)"
+        required: false
+
+permissions:
+  contents: write # create the remediation branch
+  pull-requests: write
+
+concurrency:
+  group: checkmarx-remediate
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    outputs:
+      has_findings: ${{ steps.collect.outputs.has_findings }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      # CxFlow drives the on-prem CxSAST server and writes a SARIF report.
+      # Credentials come from repo secrets; nothing is hardcoded here.
+      - name: Checkmarx SAST scan (CxFlow)
+        env:
+          CX_SERVER_URL: ${{ secrets.CX_SERVER_URL }}
+          CX_USERNAME: ${{ secrets.CX_USERNAME }}
+          CX_PASSWORD: ${{ secrets.CX_PASSWORD }}
+          CX_TEAM: ${{ secrets.CX_TEAM }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/code" \
+            -e CX_SERVER_URL -e CX_USERNAME -e CX_PASSWORD -e CX_TEAM \
+            checkmarx/cx-flow:latest \
+            --scan \
+            --cx-server="$CX_SERVER_URL" \
+            --cx-user="$CX_USERNAME" \
+            --cx-password="$CX_PASSWORD" \
+            --cx-team="$CX_TEAM" \
+            --cx-project="$REPO_NAME" \
+            --app="$REPO_NAME" \
+            --f=/code \
+            --output-type=SARIF \
+            --filename=/code/checkmarx.sarif
+          # CxFlow can exit non-zero when it finds issues; that is expected here.
+          test -f checkmarx.sarif || echo '{"runs":[]}' > checkmarx.sarif
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: normalize Checkmarx findings
+        id: collect
+        run: |
+          set -euo pipefail
+          gen_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python3 scripts/collect-findings.py \
+            --generated-at "$gen_at" \
+            --out findings.json \
+            --inputs checkmarx:sast:checkmarx.sarif
+          count="$(python3 -c 'import json,sys; print(len(json.load(open("findings.json"))["findings"]))')"
+          echo "findings: $count"
+          echo "has_findings=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checkmarx-findings
+          path: |
+            checkmarx.sarif
+            findings.json
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkmarx.sarif
+          category: checkmarx
+
+  remediate:
+    needs: scan
+    if: needs.scan.outputs.has_findings == 'true'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      AGENT_CMD: ${{ vars.AGENT_CMD }}
+      AGENT_API_KEY: ${{ secrets.AGENT_API_KEY }}
+      SCAN_REF: ${{ github.event.inputs.branch || github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: fetch normalized findings
+        uses: actions/download-artifact@v4
+        with:
+          name: checkmarx-findings
+          path: .
+
+      - name: create remediation branch
+        id: branch
+        run: |
+          set -euo pipefail
+          date_tag="$(date -u +%Y%m%d)"
+          branch="bot/code-fix-${date_tag}"
+          git config user.name "devsecops-bot"
+          git config user.email "devsecops-bot@users.noreply.github.com"
+          # Reuse today's branch if it already exists (commit on top, never --force).
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin "$branch"
+            git checkout -B "$branch" "origin/$branch"
+          else
+            git checkout -B "$branch"
+          fi
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: stage 2 — triage
+        continue-on-error: true
+        run: bash scripts/run-agent.sh triage findings.json --out agent-triage.json
+
+      - name: stage 3b — remediate all findings
+        id: fix
+        continue-on-error: true
+        run: bash scripts/run-agent.sh fix-all findings.json --out agent-fix-all.json
+
+      - name: commit remediations
+        id: commit
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "committed=false" >> "$GITHUB_OUTPUT"
+            echo "agent produced no file changes"
+            exit 0
+          fi
+          git add -A
+          git commit -m "fix: remediate Checkmarx SAST findings"
+          git push origin "HEAD:${{ steps.branch.outputs.name }}"
+          echo "committed=true" >> "$GITHUB_OUTPUT"
+
+      - name: open remediation PR
+        if: steps.commit.outputs.committed == 'true'
+        run: |
+          set -euo pipefail
+          base="${{ github.event.repository.default_branch }}"
+          head="${{ steps.branch.outputs.name }}"
+          if [ -n "$(gh pr list --head "$head" --json number --jq '.[0].number')" ]; then
+            echo "PR already open for $head"
+            exit 0
+          fi
+          summary="$(python3 scripts/summarize-remediation.py agent-fix-all.json || echo 'See changed files.')"
+          {
+            echo "Automated Checkmarx SAST remediation against \`$SCAN_REF\`."
+            echo
+            echo "$summary"
+            echo
+            echo "Lines annotated with \`REVIEW:\` are higher-risk fixes that need careful review before merge. This PR must be reviewed and merged by a human."
+          } > pr-body.md
+          gh pr create --base "$base" --head "$head" \
+            --title "fix: remediate Checkmarx SAST findings ($(date -u +%Y-%m-%d))" \
+            --body-file pr-body.md
