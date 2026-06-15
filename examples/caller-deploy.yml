@@ -1,0 +1,20 @@
+# Copy into a repo as .github/workflows/deploy.yml
+# Gated deploy: pauses for a designated reviewer's approval via the GitHub
+# Environment. Create the environment (Settings > Environments > "production")
+# and add required reviewers BEFORE first use — that is the approval gate.
+
+name: Deploy
+
+on:
+  push:
+    tags: ["v*"] # deploy on release tags; adjust to your flow
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    uses: Somu60789/DevSecOps/.github/workflows/reusable-deploy.yml@v1
+    secrets: inherit
+    with:
+      environment: production
+      url: https://your-app.example.com
+      deploy_command: ./scripts/deploy.sh # your repo's deploy script

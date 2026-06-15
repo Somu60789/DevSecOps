@@ -1,0 +1,241 @@
+name: Reusable — Security Scan
+
+# Callable end-to-end security scan. Other repos invoke this with:
+#
+#   jobs:
+#     security:
+#       uses: Somu60789/DevSecOps/.github/workflows/reusable-security.yml@v1
+#       secrets: inherit
+#
+# Runs the deterministic scanners against the CALLER's checked-out code, then
+# normalizes everything into one findings.json artifact (downloadable by the
+# review / agent-fix reusable workflows). No AI here — ground truth only.
+
+on:
+  workflow_call:
+    inputs:
+      product_repo:
+        description: Repo hosting the DevSecOps tooling/scripts
+        type: string
+        default: Somu60789/DevSecOps
+      product_ref:
+        description: Ref of the product repo to load scripts from (keep in sync with the @ref you call this at)
+        type: string
+        default: v1
+      enable_checkmarx:
+        description: Run the Checkmarx SAST job (auto-skips if CX_SERVER_URL secret is absent)
+        type: boolean
+        default: true
+      findings_artifact:
+        description: Name of the uploaded findings artifact
+        type: string
+        default: findings
+    secrets:
+      CX_SERVER_URL:
+        required: false
+      CX_USERNAME:
+        required: false
+      CX_PASSWORD:
+        required: false
+      CX_TEAM:
+        required: false
+    outputs:
+      findings_artifact:
+        description: Name of the findings artifact produced
+        value: ${{ inputs.findings_artifact }}
+      has_findings:
+        description: "true if any finding was produced"
+        value: ${{ jobs.collect.outputs.has_findings }}
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  secrets-scan:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: detect --report-format json --report-path gitleaks.json --no-git --redact
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-secrets
+          path: gitleaks.json
+          if-no-files-found: ignore
+
+  sast:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: p/default
+          generateSarif: "1"
+      - name: rename sarif
+        if: always()
+        shell: bash
+        run: test -f semgrep.sarif && cp semgrep.sarif sast.sarif || echo "{}" > sast.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: sast.sarif
+          category: semgrep
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-sast
+          path: sast.sarif
+          if-no-files-found: ignore
+
+  checkmarx:
+    if: inputs.enable_checkmarx
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: load product tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.product_repo }}
+          ref: ${{ inputs.product_ref }}
+          path: ._devsecops
+      - name: check for Checkmarx credentials
+        id: cx
+        shell: bash
+        env:
+          CX_SERVER_URL: ${{ secrets.CX_SERVER_URL }}
+        run: echo "configured=$([ -n "$CX_SERVER_URL" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: Checkmarx SAST scan
+        if: steps.cx.outputs.configured == 'true'
+        uses: ./._devsecops/.github/actions/checkmarx-scan
+        with:
+          cx-server-url: ${{ secrets.CX_SERVER_URL }}
+          cx-username: ${{ secrets.CX_USERNAME }}
+          cx-password: ${{ secrets.CX_PASSWORD }}
+          cx-team: ${{ secrets.CX_TEAM }}
+          project-name: ${{ github.event.repository.name }}
+          output-file: checkmarx.sarif
+      - name: ensure SARIF exists
+        if: always()
+        shell: bash
+        run: test -f checkmarx.sarif || echo '{"runs":[]}' > checkmarx.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkmarx.sarif
+          category: checkmarx
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-checkmarx
+          path: checkmarx.sarif
+          if-no-files-found: ignore
+
+  sca-and-iac:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: trivy filesystem (SCA + license + secrets)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          format: sarif
+          output: trivy-fs.sarif
+          scanners: vuln,license,secret
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+      - name: checkov (IaC)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          output_format: sarif
+          output_file_path: checkov.sarif
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-sca-iac
+          path: |
+            trivy-fs.sarif
+            checkov.sarif
+          if-no-files-found: ignore
+
+  clean-code:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: complexity (lizard)
+        shell: bash
+        run: |
+          pip install --quiet lizard
+          lizard -X . > lizard.xml 2>/dev/null || echo "<root/>" > lizard.xml
+      - name: duplication (jscpd)
+        shell: bash
+        run: |
+          npx --yes jscpd --silent --reporters json --output ./jscpd-report . || true
+          test -f ./jscpd-report/jscpd-report.json && cp ./jscpd-report/jscpd-report.json jscpd.json || echo "{}" > jscpd.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-clean-code
+          path: |
+            lizard.xml
+            jscpd.json
+          if-no-files-found: ignore
+
+  collect:
+    runs-on: ubuntu-latest
+    needs: [secrets-scan, sast, checkmarx, sca-and-iac, clean-code]
+    if: always()
+    outputs:
+      has_findings: ${{ steps.normalize.outputs.has_findings }}
+    steps:
+      - name: load product tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.product_repo }}
+          ref: ${{ inputs.product_ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: normalize findings
+        id: normalize
+        shell: bash
+        run: |
+          set -euo pipefail
+          gen_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          inputs=()
+          [ -f artifacts/scan-secrets/gitleaks.json ] && inputs+=("gitleaks:secret:artifacts/scan-secrets/gitleaks.json")
+          [ -f artifacts/scan-sast/sast.sarif ] && inputs+=("semgrep:sast:artifacts/scan-sast/sast.sarif")
+          [ -f artifacts/scan-checkmarx/checkmarx.sarif ] && inputs+=("checkmarx:sast:artifacts/scan-checkmarx/checkmarx.sarif")
+          [ -f artifacts/scan-sca-iac/trivy-fs.sarif ] && inputs+=("trivy:sca:artifacts/scan-sca-iac/trivy-fs.sarif")
+          [ -f artifacts/scan-sca-iac/checkov.sarif ] && inputs+=("checkov:iac:artifacts/scan-sca-iac/checkov.sarif")
+          [ -f artifacts/scan-clean-code/jscpd.json ] && inputs+=("jscpd:duplication:artifacts/scan-clean-code/jscpd.json")
+          python3 scripts/collect-findings.py --generated-at "$gen_at" --out findings.json --inputs "${inputs[@]}"
+          count="$(python3 -c 'import json; print(len(json.load(open("findings.json"))["findings"]))')"
+          echo "has_findings=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.findings_artifact }}
+          path: findings.json

@@ -1,0 +1,53 @@
+name: Reusable — Gated Deploy
+
+# Deploy behind a GitHub Environment protection rule. The environment (set its
+# required reviewers in the caller repo's Settings > Environments) is the human
+# approval gate — the job pauses until a designated reviewer approves. This is
+# the second human-in-the-loop gate (PR merge being the first).
+#
+#   deploy:
+#     uses: Somu60789/DevSecOps/.github/workflows/reusable-deploy.yml@v1
+#     with:
+#       environment: production
+#       deploy_command: ./scripts/deploy.sh
+#     secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub Environment to deploy to (carries the approval gate)
+        type: string
+        required: true
+      deploy_command:
+        description: Command that performs the deploy
+        type: string
+        required: true
+      url:
+        description: Deployment URL surfaced in the Environments UI
+        type: string
+        default: ""
+      runs_on:
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    runs-on: ${{ inputs.runs_on }}
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: deploy
+        shell: bash
+        env:
+          DEPLOY_COMMAND: ${{ inputs.deploy_command }}
+        run: |
+          set -euo pipefail
+          echo "Deploying to '${{ inputs.environment }}' (approved via environment protection)."
+          bash -c "$DEPLOY_COMMAND"

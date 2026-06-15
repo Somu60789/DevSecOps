@@ -1,0 +1,77 @@
+name: Reusable — PR Review Comment
+
+# Posts ONE consolidated review comment per commit from a findings artifact.
+# Call from a pull_request-triggered workflow AFTER reusable-security.yml:
+#
+#   jobs:
+#     security:
+#       uses: Somu60789/DevSecOps/.github/workflows/reusable-security.yml@v1
+#       secrets: inherit
+#     review:
+#       needs: security
+#       uses: Somu60789/DevSecOps/.github/workflows/reusable-review.yml@v1
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      product_repo:
+        type: string
+        default: Somu60789/DevSecOps
+      product_ref:
+        type: string
+        default: v1
+      findings_artifact:
+        type: string
+        default: findings
+      triage_artifact:
+        description: Optional agent-outputs artifact (triage/optimize); review degrades to raw findings if absent
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: load product tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.product_repo }}
+          ref: ${{ inputs.product_ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: download findings
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.findings_artifact }}
+          path: .
+      - name: download agent outputs (optional)
+        if: inputs.triage_artifact != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.triage_artifact }}
+          path: .
+      - name: post consolidated review comment
+        shell: bash
+        run: |
+          set -euo pipefail
+          triage_arg=""
+          optimize_arg=""
+          [ -f agent-triage.json ] && triage_arg="--triage agent-triage.json"
+          [ -f agent-optimize.json ] && optimize_arg="--optimize agent-optimize.json"
+          python3 scripts/post-review.py \
+            --commit "${{ github.event.pull_request.head.sha }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --findings findings.json \
+            $triage_arg $optimize_arg
