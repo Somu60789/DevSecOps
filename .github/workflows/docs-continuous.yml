@@ -1,0 +1,98 @@
+name: Continuous Documentation
+
+# Two cooperating modes so code and docs never drift:
+#  - pull_request: regenerate docs and commit them onto the SAME PR branch.
+#  - schedule (nightly): full sweep; if anything drifted, open/refresh a
+#    standalone bot/docs-update PR.
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 2 * * *" # nightly sweep
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  per-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: regenerate docs
+        run: python3 scripts/gen-docs.py --root . --out docs
+      - name: commit doc changes to the PR branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          git config user.name "devsecops-bot"
+          git config user.email "devsecops-bot@users.noreply.github.com"
+          if git diff --quiet -- docs; then
+            echo "docs already in sync"
+            exit 0
+          fi
+          git add docs
+          git commit -m "docs: sync documentation with code changes"
+          git push origin "HEAD:$HEAD_REF"
+
+  nightly-sweep:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: check for doc drift
+        id: check
+        run: |
+          if python3 scripts/gen-docs.py --root . --out docs --check; then
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: open or refresh bot/docs-update PR
+        if: steps.check.outputs.drift == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "devsecops-bot"
+          git config user.email "devsecops-bot@users.noreply.github.com"
+          # Start from the existing bot/docs-update branch if it exists, so we
+          # commit on top rather than force-pushing (never --force).
+          if git ls-remote --exit-code --heads origin bot/docs-update >/dev/null 2>&1; then
+            git fetch origin bot/docs-update
+            git checkout -B bot/docs-update origin/bot/docs-update
+          else
+            git checkout -B bot/docs-update
+          fi
+          python3 scripts/gen-docs.py --root . --out docs
+          if git diff --quiet -- docs; then
+            echo "no drift after rebasing onto existing branch"
+            exit 0
+          fi
+          git add docs
+          git commit -m "docs: nightly sweep — sync drifted documentation"
+          git push origin bot/docs-update
+          if [ -z "$(gh pr list --head bot/docs-update --json number --jq '.[0].number')" ]; then
+            gh pr create --base "${{ github.event.repository.default_branch }}" \
+              --head bot/docs-update \
+              --title "docs: nightly documentation sync" \
+              --body "Automated nightly sweep detected documentation drift and regenerated the affected docs."
+          fi
