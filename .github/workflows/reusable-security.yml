@@ -1,47 +1,58 @@
-name: DevSecOps Scanners
+name: Reusable — Security Scan
 
-# Stage 1: deterministic scanners only — no AI. Produces SARIF (uploaded to code
-# scanning) plus a single normalized findings.json artifact for the AI stages.
-# Every scanner job is non-fatal so one failure never blocks the others.
+# Callable end-to-end security scan. Other repos invoke this with:
+#
+#   jobs:
+#     security:
+#       uses: Somu60789/DevSecOps/.github/workflows/reusable-security.yml@v1
+#       secrets: inherit
+#
+# Runs the deterministic scanners against the CALLER's checked-out code, then
+# normalizes everything into one findings.json artifact (downloadable by the
+# review / agent-fix reusable workflows). No AI here — ground truth only.
 
 on:
-  push:
-  pull_request:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 3 * * *" # nightly full sweep
+  workflow_call:
+    inputs:
+      product_repo:
+        description: Repo hosting the DevSecOps tooling/scripts
+        type: string
+        default: Somu60789/DevSecOps
+      product_ref:
+        description: Ref of the product repo to load scripts from (keep in sync with the @ref you call this at)
+        type: string
+        default: v1
+      enable_checkmarx:
+        description: Run the Checkmarx SAST job (auto-skips if CX_SERVER_URL secret is absent)
+        type: boolean
+        default: true
+      findings_artifact:
+        description: Name of the uploaded findings artifact
+        type: string
+        default: findings
+    secrets:
+      CX_SERVER_URL:
+        required: false
+      CX_USERNAME:
+        required: false
+      CX_PASSWORD:
+        required: false
+      CX_TEAM:
+        required: false
+    outputs:
+      findings_artifact:
+        description: Name of the findings artifact produced
+        value: ${{ inputs.findings_artifact }}
+      has_findings:
+        description: "true if any finding was produced"
+        value: ${{ jobs.collect.outputs.has_findings }}
 
 permissions:
   contents: read
-  security-events: write # upload SARIF to code scanning
-
-concurrency:
-  group: devsecops-${{ github.ref }}
-  cancel-in-progress: true
+  security-events: write
 
 jobs:
-  detect-stack:
-    runs-on: ubuntu-latest
-    outputs:
-      has_node: ${{ steps.detect.outputs.has_node }}
-      has_python: ${{ steps.detect.outputs.has_python }}
-      has_docker: ${{ steps.detect.outputs.has_docker }}
-      has_iac: ${{ steps.detect.outputs.has_iac }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: detect
-        shell: bash
-        run: |
-          set -euo pipefail
-          has() { [ -n "$(find . -name "$1" -not -path './.git/*' -print -quit)" ] && echo true || echo false; }
-          {
-            echo "has_node=$(has package.json)"
-            echo "has_python=$( { [ "$(has requirements.txt)" = true ] || [ "$(has pyproject.toml)" = true ] || [ "$(has setup.py)" = true ]; } && echo true || echo false)"
-            echo "has_docker=$(has Dockerfile)"
-            echo "has_iac=$( { [ "$(has '*.tf')" = true ] || [ -d .github/workflows ] || [ "$(has docker-compose.yml)" = true ]; } && echo true || echo false)"
-          } >> "$GITHUB_OUTPUT"
-
-  secrets:
+  secrets-scan:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -88,12 +99,17 @@ jobs:
           if-no-files-found: ignore
 
   checkmarx:
+    if: inputs.enable_checkmarx
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      # Only scan when Checkmarx credentials are configured; otherwise emit an
-      # empty SARIF so the collect step has a consistent artifact to read.
+      - name: load product tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.product_repo }}
+          ref: ${{ inputs.product_ref }}
+          path: ._devsecops
       - name: check for Checkmarx credentials
         id: cx
         shell: bash
@@ -102,7 +118,7 @@ jobs:
         run: echo "configured=$([ -n "$CX_SERVER_URL" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - name: Checkmarx SAST scan
         if: steps.cx.outputs.configured == 'true'
-        uses: ./.github/actions/checkmarx-scan
+        uses: ./._devsecops/.github/actions/checkmarx-scan
         with:
           cx-server-url: ${{ secrets.CX_SERVER_URL }}
           cx-username: ${{ secrets.CX_USERNAME }}
@@ -161,7 +177,6 @@ jobs:
   clean-code:
     runs-on: ubuntu-latest
     continue-on-error: true
-    needs: detect-stack
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -177,12 +192,6 @@ jobs:
         run: |
           npx --yes jscpd --silent --reporters json --output ./jscpd-report . || true
           test -f ./jscpd-report/jscpd-report.json && cp ./jscpd-report/jscpd-report.json jscpd.json || echo "{}" > jscpd.json
-      - name: dead code (vulture)
-        if: needs.detect-stack.outputs.has_python == 'true'
-        shell: bash
-        run: |
-          pip install --quiet vulture
-          vulture . --min-confidence 80 > vulture.txt 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -190,15 +199,20 @@ jobs:
           path: |
             lizard.xml
             jscpd.json
-            vulture.txt
           if-no-files-found: ignore
 
   collect:
     runs-on: ubuntu-latest
-    needs: [secrets, sast, checkmarx, sca-and-iac, clean-code]
+    needs: [secrets-scan, sast, checkmarx, sca-and-iac, clean-code]
     if: always()
+    outputs:
+      has_findings: ${{ steps.normalize.outputs.has_findings }}
     steps:
-      - uses: actions/checkout@v4
+      - name: load product tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.product_repo }}
+          ref: ${{ inputs.product_ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -206,6 +220,7 @@ jobs:
         with:
           path: artifacts
       - name: normalize findings
+        id: normalize
         shell: bash
         run: |
           set -euo pipefail
@@ -218,7 +233,9 @@ jobs:
           [ -f artifacts/scan-sca-iac/checkov.sarif ] && inputs+=("checkov:iac:artifacts/scan-sca-iac/checkov.sarif")
           [ -f artifacts/scan-clean-code/jscpd.json ] && inputs+=("jscpd:duplication:artifacts/scan-clean-code/jscpd.json")
           python3 scripts/collect-findings.py --generated-at "$gen_at" --out findings.json --inputs "${inputs[@]}"
+          count="$(python3 -c 'import json; print(len(json.load(open("findings.json"))["findings"]))')"
+          echo "has_findings=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: findings
+          name: ${{ inputs.findings_artifact }}
           path: findings.json

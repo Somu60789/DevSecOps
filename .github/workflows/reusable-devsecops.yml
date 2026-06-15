@@ -1,0 +1,99 @@
+name: Reusable — DevSecOps End-to-End
+
+# The whole product in one call. Chains build -> security scan -> AI safe-fix ->
+# docs -> consolidated PR review comment, each individually toggleable. Deploy is
+# intentionally NOT chained here — it is a separate gated workflow (see
+# reusable-deploy.yml) so a release always sits behind an environment approval.
+#
+#   jobs:
+#     devsecops:
+#       uses: Somu60789/DevSecOps/.github/workflows/reusable-devsecops.yml@v1
+#       secrets: inherit
+#       with:
+#         enable_build: true
+#         enable_agent_fix: true
+#         enable_docs: true
+#         enable_checkmarx: true
+
+on:
+  workflow_call:
+    inputs:
+      product_ref:
+        description: Ref of the product repo to load tooling from (match your @ref)
+        type: string
+        default: v1
+      enable_build:
+        type: boolean
+        default: true
+      enable_security:
+        type: boolean
+        default: true
+      enable_agent_fix:
+        type: boolean
+        default: true
+      enable_docs:
+        type: boolean
+        default: true
+      enable_review:
+        type: boolean
+        default: true
+      enable_checkmarx:
+        type: boolean
+        default: true
+    secrets:
+      AGENT_API_KEY:
+        required: false
+      CX_SERVER_URL:
+        required: false
+      CX_USERNAME:
+        required: false
+      CX_PASSWORD:
+        required: false
+      CX_TEAM:
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: write
+  issues: write
+  packages: write
+
+jobs:
+  build:
+    if: inputs.enable_build
+    uses: ./.github/workflows/reusable-build.yml
+
+  security:
+    if: inputs.enable_security
+    uses: ./.github/workflows/reusable-security.yml
+    with:
+      product_ref: ${{ inputs.product_ref }}
+      enable_checkmarx: ${{ inputs.enable_checkmarx }}
+    secrets: inherit
+
+  agent-fix:
+    if: inputs.enable_agent_fix && github.event_name == 'pull_request'
+    needs: security
+    uses: ./.github/workflows/reusable-agent-fix.yml
+    with:
+      product_ref: ${{ inputs.product_ref }}
+    secrets: inherit
+
+  docs:
+    if: inputs.enable_docs
+    uses: ./.github/workflows/reusable-docs.yml
+    with:
+      product_ref: ${{ inputs.product_ref }}
+    secrets: inherit
+
+  review:
+    # Runs after agent-fix when enabled so triage/optimize feed the comment;
+    # always() lets it still post when agent-fix is disabled or fails.
+    if: always() && inputs.enable_review && github.event_name == 'pull_request'
+    needs: [security, agent-fix]
+    uses: ./.github/workflows/reusable-review.yml
+    with:
+      product_ref: ${{ inputs.product_ref }}
+      triage_artifact: agent-outputs
+    secrets: inherit

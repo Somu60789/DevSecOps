@@ -35,6 +35,17 @@ def test_security_finding_appears_and_counts_failure():
     assert "❌ Failures: 1" in body
 
 
+def test_checkmarx_finding_routed_to_security_section():
+    f = {"id": "cx1", "tool": "checkmarx", "category": "sast", "severity": "high",
+         "file": "src/db.py", "line": 42, "rule_id": "SQL_Injection",
+         "message": "SQL Injection in query builder"}
+    body = pr.build_comment("abc1234", _findings(f), verdicts=[], optimize={"suggestions": []})
+    security_section = body.split("### Security")[1].split("### Code Quality")[0]
+    assert "SQL Injection in query builder" in security_section
+    assert "src/db.py" in security_section
+    assert "❌ Failures: 1" in body
+
+
 def test_clean_code_finding_routed_to_clean_code_section():
     f = {"id": "2", "tool": "lizard", "category": "complexity", "severity": "medium",
          "file": "big.py", "line": 10, "rule_id": "ccn", "message": "cyclomatic complexity 14 > 10"}

@@ -1,0 +1,163 @@
+name: Reusable — Build & Test
+
+# Multi-stack build + test. Auto-detects the caller's stack and runs the
+# matching build/test, plus an optional container image build. Call with:
+#
+#   build:
+#     uses: Somu60789/DevSecOps/.github/workflows/reusable-build.yml@v1
+#     with:
+#       node_version: "20"
+#       python_version: "3.12"
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        type: string
+        default: "20"
+      python_version:
+        type: string
+        default: "3.12"
+      java_version:
+        type: string
+        default: "21"
+      go_version:
+        type: string
+        default: "1.22"
+      build_container:
+        description: Build a Docker image when a Dockerfile is present
+        type: boolean
+        default: true
+      image_name:
+        description: Image name to build (defaults to the repo name)
+        type: string
+        default: ""
+    outputs:
+      stacks:
+        description: Space-separated detected stacks
+        value: ${{ jobs.detect.outputs.stacks }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      has_node: ${{ steps.d.outputs.has_node }}
+      has_python: ${{ steps.d.outputs.has_python }}
+      has_java: ${{ steps.d.outputs.has_java }}
+      has_go: ${{ steps.d.outputs.has_go }}
+      has_docker: ${{ steps.d.outputs.has_docker }}
+      stacks: ${{ steps.d.outputs.stacks }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: d
+        shell: bash
+        run: |
+          set -euo pipefail
+          has() { [ -n "$(find . -name "$1" -not -path './.git/*' -print -quit)" ] && echo true || echo false; }
+          hn=$(has package.json)
+          hp=$( { [ "$(has requirements.txt)" = true ] || [ "$(has pyproject.toml)" = true ] || [ "$(has setup.py)" = true ]; } && echo true || echo false)
+          hj=$( { [ "$(has pom.xml)" = true ] || [ "$(has build.gradle)" = true ]; } && echo true || echo false)
+          hg=$(has go.mod)
+          hd=$(has Dockerfile)
+          stacks=""
+          [ "$hn" = true ] && stacks="$stacks node"
+          [ "$hp" = true ] && stacks="$stacks python"
+          [ "$hj" = true ] && stacks="$stacks java"
+          [ "$hg" = true ] && stacks="$stacks go"
+          [ "$hd" = true ] && stacks="$stacks docker"
+          {
+            echo "has_node=$hn"; echo "has_python=$hp"; echo "has_java=$hj"
+            echo "has_go=$hg"; echo "has_docker=$hd"
+            echo "stacks=$(echo "$stacks" | xargs)"
+          } >> "$GITHUB_OUTPUT"
+
+  node:
+    needs: detect
+    if: needs.detect.outputs.has_node == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+      - name: install
+        run: npm ci || npm install
+      - name: build
+        run: npm run build --if-present
+      - name: test
+        run: npm test --if-present
+
+  python:
+    needs: detect
+    if: needs.detect.outputs.has_python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          [ -f requirements.txt ] && pip install -r requirements.txt || true
+          [ -f pyproject.toml ] && pip install -e . || true
+          pip install pytest
+      - name: test
+        run: pytest -q || echo "no tests or tests failed (non-fatal in build stage)"
+
+  java:
+    needs: detect
+    if: needs.detect.outputs.has_java == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version }}
+      - name: build & test
+        run: |
+          if [ -f pom.xml ]; then
+            mvn -B verify
+          else
+            chmod +x ./gradlew 2>/dev/null || true
+            ./gradlew build
+          fi
+
+  go:
+    needs: detect
+    if: needs.detect.outputs.has_go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go_version }}
+      - name: build & test
+        run: |
+          go build ./...
+          go test ./...
+
+  container:
+    needs: detect
+    if: inputs.build_container && needs.detect.outputs.has_docker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: resolve image name
+        id: img
+        shell: bash
+        run: |
+          name="${{ inputs.image_name }}"
+          [ -z "$name" ] && name="${{ github.event.repository.name }}"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - name: build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: ${{ steps.img.outputs.name }}:${{ github.sha }}

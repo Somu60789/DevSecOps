@@ -1,0 +1,24 @@
+# Copy this file into ANY repo as .github/workflows/devsecops.yml
+# That's the entire integration — the whole DevSecOps product runs from here.
+
+name: DevSecOps
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *" # nightly docs sweep + scheduled scan
+
+jobs:
+  devsecops:
+    uses: Somu60789/DevSecOps/.github/workflows/reusable-devsecops.yml@v1
+    secrets: inherit
+    with:
+      product_ref: v1
+      enable_build: true
+      enable_security: true
+      enable_agent_fix: true
+      enable_docs: true
+      enable_review: true
+      enable_checkmarx: true # auto-skips if CX_SERVER_URL secret is absent

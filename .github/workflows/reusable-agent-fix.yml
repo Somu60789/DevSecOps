@@ -1,0 +1,108 @@
+name: Reusable — AI Safe Auto-Fix
+
+# Triage findings and apply ONLY unambiguously-safe fixes to the PR branch,
+# then upload an agent-outputs artifact (triage + optimize) for the review step.
+# Suggestion-only optimizer output is never auto-applied. Call AFTER
+# reusable-security.yml on a pull_request trigger:
+#
+#   agent-fix:
+#     needs: security
+#     uses: Somu60789/DevSecOps/.github/workflows/reusable-agent-fix.yml@v1
+#     secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      product_repo:
+        type: string
+        default: Somu60789/DevSecOps
+      product_ref:
+        type: string
+        default: v1
+      findings_artifact:
+        type: string
+        default: findings
+      commit_fixes:
+        description: Commit safe fixes back to the PR branch
+        type: boolean
+        default: true
+    secrets:
+      AGENT_API_KEY:
+        required: false
+    outputs:
+      agent_artifact:
+        description: Name of the uploaded agent-outputs artifact
+        value: agent-outputs
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  agent-fix:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      AGENT_CMD: ${{ vars.AGENT_CMD }}
+      AGENT_API_KEY: ${{ secrets.AGENT_API_KEY }}
+      BASE_REF: origin/${{ github.event.pull_request.base.ref }}
+    steps:
+      - name: checkout caller PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: load product tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.product_repo }}
+          ref: ${{ inputs.product_ref }}
+          path: ._devsecops
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: download findings
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.findings_artifact }}
+          path: .
+      - name: stage 2 — triage
+        id: triage
+        continue-on-error: true
+        run: bash ._devsecops/scripts/run-agent.sh triage findings.json --out agent-triage.json
+      - name: stage 3 — safe auto-fix
+        id: fix
+        if: steps.triage.outcome == 'success'
+        continue-on-error: true
+        run: bash ._devsecops/scripts/run-agent.sh fix findings.json --out agent-fix.json
+      - name: stage 4 — optimize (suggestion-only)
+        continue-on-error: true
+        run: bash ._devsecops/scripts/run-agent.sh optimize findings.json --out agent-optimize.json
+      - name: commit safe fixes to PR branch
+        if: inputs.commit_fixes && steps.fix.outcome == 'success'
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          git config user.name "devsecops-bot"
+          git config user.email "devsecops-bot@users.noreply.github.com"
+          # Never stage the product tooling checkout.
+          if git diff --quiet -- . ':(exclude)._devsecops'; then
+            echo "no safe fixes to commit"
+            exit 0
+          fi
+          git add -- . ':(exclude)._devsecops'
+          git commit -m "fix: apply unambiguously-safe scanner fixes"
+          git push origin "HEAD:$HEAD_REF"
+      - name: upload agent outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-outputs
+          path: |
+            findings.json
+            agent-triage.json
+            agent-fix.json
+            agent-optimize.json
+          if-no-files-found: ignore
