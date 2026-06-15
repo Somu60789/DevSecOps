@@ -4,9 +4,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+
+
 findings.json
 agent-*.json
-findings.json
+
 *.sarif
 gitleaks.json
 jscpd.json
