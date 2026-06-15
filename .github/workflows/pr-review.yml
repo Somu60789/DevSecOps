@@ -1,0 +1,60 @@
+name: PR Review Bot
+
+# Stage 6: posts ONE consolidated review comment per commit, plus a top-level
+# pass/fail summary per PR. Runs after the AI agent workflow finishes and
+# consumes its agent-outputs artifact. Idempotent: re-runs edit the existing
+# comment rather than duplicating it.
+
+on:
+  workflow_run:
+    workflows: ["AI Agent (triage / fix / optimize)"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: pr-review-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: download agent outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-outputs
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: .
+
+      - name: resolve PR number
+        id: pr
+        run: |
+          set -euo pipefail
+          branch="${{ github.event.workflow_run.head_branch }}"
+          num="$(gh pr list --head "$branch" --json number --jq '.[0].number')"
+          echo "number=$num" >> "$GITHUB_OUTPUT"
+
+      - name: post consolidated review comment
+        if: steps.pr.outputs.number != ''
+        run: |
+          set -euo pipefail
+          python3 scripts/post-review.py \
+            --commit "${{ github.event.workflow_run.head_sha }}" \
+            --pr "${{ steps.pr.outputs.number }}" \
+            --repo "${{ github.repository }}" \
+            --findings findings.json \
+            --triage agent-triage.json \
+            --optimize agent-optimize.json
