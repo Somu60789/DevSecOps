@@ -53,7 +53,7 @@ input, and secret.
 | Consolidated PR review comment | `reusable-review.yml` |
 | Continuous documentation | `reusable-docs.yml` |
 | Checkmarx scan → remediation PR | `reusable-checkmarx-remediate.yml` |
-| Gradle / Node build + multi-registry publish | `reusable-build-gradle.yml`, `reusable-build-node.yml` |
+| Gradle / Node / Python build + multi-registry publish | `reusable-build-gradle.yml`, `reusable-build-node.yml`, `reusable-build-python.yml` |
 | Multi-stack tests + coverage gate | `reusable-test.yml` |
 | Gated deploy (environment approval) | `reusable-deploy.yml` |
 
