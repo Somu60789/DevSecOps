@@ -26,6 +26,13 @@ on:
         description: Run the Checkmarx SAST job (auto-skips if CX_SERVER_URL secret is absent)
         type: boolean
         default: true
+      upload_sarif:
+        description: >-
+          Upload SARIF to the GitHub Security tab (code scanning). Requires
+          GitHub Advanced Security; leave false on repos without it. Findings
+          still flow into findings.json and the PR review comment regardless.
+        type: boolean
+        default: false
       findings_artifact:
         description: Name of the uploaded findings artifact
         type: string
@@ -87,7 +94,8 @@ jobs:
         shell: bash
         run: test -f semgrep.sarif && cp semgrep.sarif sast.sarif || echo "{}" > sast.sarif
       - uses: github/codeql-action/upload-sarif@v4
-        if: always()
+        if: always() && inputs.upload_sarif
+        continue-on-error: true
         with:
           sarif_file: sast.sarif
           category: semgrep
@@ -131,7 +139,8 @@ jobs:
         shell: bash
         run: test -f checkmarx.sarif || echo '{"runs":[]}' > checkmarx.sarif
       - uses: github/codeql-action/upload-sarif@v4
-        if: always()
+        if: always() && inputs.upload_sarif
+        continue-on-error: true
         with:
           sarif_file: checkmarx.sarif
           category: checkmarx
@@ -155,7 +164,8 @@ jobs:
           output: trivy-fs.sarif
           scanners: vuln,license,secret
       - uses: github/codeql-action/upload-sarif@v4
-        if: always()
+        if: always() && inputs.upload_sarif
+        continue-on-error: true
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs

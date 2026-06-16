@@ -77,6 +77,7 @@ jobs:
         run: test -f semgrep.sarif && cp semgrep.sarif sast.sarif || echo "{}" > sast.sarif
       - uses: github/codeql-action/upload-sarif@v4
         if: always()
+        continue-on-error: true # no-op on repos without Advanced Security
         with:
           sarif_file: sast.sarif
           category: semgrep
@@ -116,6 +117,7 @@ jobs:
         run: test -f checkmarx.sarif || echo '{"runs":[]}' > checkmarx.sarif
       - uses: github/codeql-action/upload-sarif@v4
         if: always()
+        continue-on-error: true # no-op on repos without Advanced Security
         with:
           sarif_file: checkmarx.sarif
           category: checkmarx
@@ -140,6 +142,7 @@ jobs:
           scanners: vuln,license,secret
       - uses: github/codeql-action/upload-sarif@v4
         if: always()
+        continue-on-error: true # no-op on repos without Advanced Security
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs

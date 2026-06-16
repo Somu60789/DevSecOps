@@ -83,6 +83,7 @@ jobs:
             findings.json
       - uses: github/codeql-action/upload-sarif@v4
         if: always()
+        continue-on-error: true # no-op on repos without Advanced Security
         with:
           sarif_file: checkmarx.sarif
           category: checkmarx

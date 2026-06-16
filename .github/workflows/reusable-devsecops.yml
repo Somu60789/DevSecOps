@@ -40,6 +40,10 @@ on:
       enable_checkmarx:
         type: boolean
         default: true
+      upload_sarif:
+        description: Upload SARIF to the Security tab (requires GitHub Advanced Security)
+        type: boolean
+        default: false
     secrets:
       AGENT_API_KEY:
         required: false
@@ -70,6 +74,7 @@ jobs:
     with:
       product_ref: ${{ inputs.product_ref }}
       enable_checkmarx: ${{ inputs.enable_checkmarx }}
+      upload_sarif: ${{ inputs.upload_sarif }}
     secrets: inherit
 
   agent-fix:
