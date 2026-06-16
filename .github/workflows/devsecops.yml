@@ -28,7 +28,7 @@ jobs:
       has_docker: ${{ steps.detect.outputs.has_docker }}
       has_iac: ${{ steps.detect.outputs.has_iac }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: detect
         shell: bash
         run: |
@@ -45,16 +45,16 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: detect --report-format json --report-path gitleaks.json --no-git --redact
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scan-secrets
@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: semgrep
         uses: semgrep/semgrep-action@v1
         with:
@@ -75,12 +75,12 @@ jobs:
         if: always()
         shell: bash
         run: test -f semgrep.sarif && cp semgrep.sarif sast.sarif || echo "{}" > sast.sarif
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: sast.sarif
           category: semgrep
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scan-sast
@@ -91,7 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       # Only scan when Checkmarx credentials are configured; otherwise emit an
       # empty SARIF so the collect step has a consistent artifact to read.
       - name: check for Checkmarx credentials
@@ -114,12 +114,12 @@ jobs:
         if: always()
         shell: bash
         run: test -f checkmarx.sarif || echo '{"runs":[]}' > checkmarx.sarif
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: checkmarx.sarif
           category: checkmarx
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scan-checkmarx
@@ -130,15 +130,15 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: trivy filesystem (SCA + license + secrets)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           format: sarif
           output: trivy-fs.sarif
           scanners: vuln,license,secret
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-fs.sarif
@@ -149,7 +149,7 @@ jobs:
           output_format: sarif
           output_file_path: checkov.sarif
         continue-on-error: true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scan-sca-iac
@@ -163,8 +163,8 @@ jobs:
     continue-on-error: true
     needs: detect-stack
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: complexity (lizard)
@@ -183,7 +183,7 @@ jobs:
         run: |
           pip install --quiet vulture
           vulture . --min-confidence 80 > vulture.txt 2>/dev/null || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scan-clean-code
@@ -198,11 +198,11 @@ jobs:
     needs: [secrets, sast, checkmarx, sca-and-iac, clean-code]
     if: always()
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: normalize findings
@@ -218,7 +218,7 @@ jobs:
           [ -f artifacts/scan-sca-iac/checkov.sarif ] && inputs+=("checkov:iac:artifacts/scan-sca-iac/checkov.sarif")
           [ -f artifacts/scan-clean-code/jscpd.json ] && inputs+=("jscpd:duplication:artifacts/scan-clean-code/jscpd.json")
           python3 scripts/collect-findings.py --generated-at "$gen_at" --out findings.json --inputs "${inputs[@]}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: findings
           path: findings.json

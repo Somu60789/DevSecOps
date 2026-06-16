@@ -29,7 +29,7 @@ jobs:
     outputs:
       has_findings: ${{ steps.collect.outputs.has_findings }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.branch || github.event.repository.default_branch }}
           fetch-depth: 0
@@ -47,7 +47,7 @@ jobs:
           project-name: ${{ github.event.repository.name }}
           output-file: checkmarx.sarif
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -64,14 +64,14 @@ jobs:
           echo "findings: $count"
           echo "has_findings=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: checkmarx-findings
           path: |
             checkmarx.sarif
             findings.json
 
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: checkmarx.sarif
@@ -87,17 +87,17 @@ jobs:
       AGENT_API_KEY: ${{ secrets.AGENT_API_KEY }}
       SCAN_REF: ${{ github.event.inputs.branch || github.event.repository.default_branch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.branch || github.event.repository.default_branch }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: fetch normalized findings
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: checkmarx-findings
           path: .

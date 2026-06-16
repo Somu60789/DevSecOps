@@ -52,7 +52,7 @@ jobs:
       has_docker: ${{ steps.d.outputs.has_docker }}
       stacks: ${{ steps.d.outputs.stacks }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: d
         shell: bash
         run: |
@@ -80,8 +80,8 @@ jobs:
     if: needs.detect.outputs.has_node == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node_version }}
       - name: install
@@ -96,8 +96,8 @@ jobs:
     if: needs.detect.outputs.has_python == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.python_version }}
       - name: install
@@ -114,8 +114,8 @@ jobs:
     if: needs.detect.outputs.has_java == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ inputs.java_version }}
@@ -133,8 +133,8 @@ jobs:
     if: needs.detect.outputs.has_go == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ inputs.go_version }}
       - name: build & test
@@ -147,7 +147,7 @@ jobs:
     if: inputs.build_container && needs.detect.outputs.has_docker == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: resolve image name
         id: img
         shell: bash
@@ -156,7 +156,7 @@ jobs:
           [ -z "$name" ] && name="${{ github.event.repository.name }}"
           echo "name=$name" >> "$GITHUB_OUTPUT"
       - name: build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false

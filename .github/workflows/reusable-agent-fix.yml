@@ -48,21 +48,21 @@ jobs:
       BASE_REF: origin/${{ github.event.pull_request.base.ref }}
     steps:
       - name: checkout caller PR branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
       - name: load product tooling
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
           path: ._devsecops
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: download findings
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.findings_artifact }}
           path: .
@@ -97,7 +97,7 @@ jobs:
           git push origin "HEAD:$HEAD_REF"
       - name: upload agent outputs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-outputs
           path: |
