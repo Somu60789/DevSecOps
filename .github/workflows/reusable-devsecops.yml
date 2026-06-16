@@ -49,7 +49,9 @@ on:
         required: false
       CX_PASSWORD:
         required: false
-      CX_TEAM:
+      CX_CLIENT_SECRET:
+        required: false
+      CX_PAT:
         required: false
 
 permissions:

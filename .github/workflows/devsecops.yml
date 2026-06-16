@@ -107,23 +107,26 @@ jobs:
           cx-server-url: ${{ secrets.CX_SERVER_URL }}
           cx-username: ${{ secrets.CX_USERNAME }}
           cx-password: ${{ secrets.CX_PASSWORD }}
-          cx-team: ${{ secrets.CX_TEAM }}
+          cx-client-secret: ${{ secrets.CX_CLIENT_SECRET }}
+          github-token: ${{ secrets.CX_PAT || secrets.GITHUB_TOKEN }}
           project-name: ${{ github.event.repository.name }}
-          output-file: checkmarx.sarif
+          sarif-file: cx.sarif
       - name: ensure SARIF exists
         if: always()
         shell: bash
-        run: test -f checkmarx.sarif || echo '{"runs":[]}' > checkmarx.sarif
+        run: test -f cx.sarif || echo '{"runs":[]}' > cx.sarif
       - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: checkmarx.sarif
+          sarif_file: cx.sarif
           category: checkmarx
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scan-checkmarx
-          path: checkmarx.sarif
+          path: |
+            cx.sarif
+            checkmarx-report.pdf
           if-no-files-found: ignore
 
   sca-and-iac:
@@ -213,7 +216,7 @@ jobs:
           inputs=()
           [ -f artifacts/scan-secrets/gitleaks.json ] && inputs+=("gitleaks:secret:artifacts/scan-secrets/gitleaks.json")
           [ -f artifacts/scan-sast/sast.sarif ] && inputs+=("semgrep:sast:artifacts/scan-sast/sast.sarif")
-          [ -f artifacts/scan-checkmarx/checkmarx.sarif ] && inputs+=("checkmarx:sast:artifacts/scan-checkmarx/checkmarx.sarif")
+          [ -f artifacts/scan-checkmarx/cx.sarif ] && inputs+=("checkmarx:sast:artifacts/scan-checkmarx/cx.sarif")
           [ -f artifacts/scan-sca-iac/trivy-fs.sarif ] && inputs+=("trivy:sca:artifacts/scan-sca-iac/trivy-fs.sarif")
           [ -f artifacts/scan-sca-iac/checkov.sarif ] && inputs+=("checkov:iac:artifacts/scan-sca-iac/checkov.sarif")
           [ -f artifacts/scan-clean-code/jscpd.json ] && inputs+=("jscpd:duplication:artifacts/scan-clean-code/jscpd.json")

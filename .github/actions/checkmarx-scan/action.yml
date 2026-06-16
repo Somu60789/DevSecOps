@@ -1,10 +1,13 @@
 name: Checkmarx SAST scan (CxFlow)
 description: >-
-  Run a Checkmarx SAST scan against the checked-out source via CxFlow (on-prem
-  CxSAST) and write a SARIF report. Used by both the PR scanner pipeline and the
-  remediation workflow so the CxFlow invocation lives in one place.
+  Run a Checkmarx SAST scan via the official CxFlow GitHub Action, then fetch a
+  PDF report through the CxSAST REST API (token -> request -> poll -> download).
+  Emits SARIF (cx.sarif, consumed by the agent remediation flow) and a PDF
+  report. All Checkmarx parameters are configurable inputs — no org-specific
+  values are baked in.
 
 inputs:
+  # --- connection / auth ---
   cx-server-url:
     description: CxSAST server URL
     required: true
@@ -14,49 +17,223 @@ inputs:
   cx-password:
     description: CxSAST password
     required: true
-  cx-team:
-    description: CxSAST team
+  cx-client-secret:
+    description: CxSAST OIDC client secret (resource_owner_client)
     required: true
+  github-token:
+    description: GitHub token/PAT CxFlow uses to post results/PRs
+    required: false
+    default: ""
+  # --- scan scope ---
   project-name:
     description: Checkmarx project name
     required: true
-  output-file:
-    description: Path to write the SARIF report
+  team:
+    description: CxSAST team path (e.g. /CxServer or /CxServer/MyTeam)
     required: false
-    default: checkmarx.sarif
+    default: /CxServer
+  app:
+    description: CxFlow app name (defaults to the project name if empty)
+    required: false
+    default: ""
+  preset:
+    description: Checkmarx scan preset
+    required: false
+    default: Checkmarx Default
+  branch:
+    description: Branch label passed to CxFlow (--cx-flow.branch)
+    required: false
+    default: ""
+  zip-exclude:
+    description: >-
+      CxFlow zip-exclude pattern (Java regex, NOT glob). Excludes vendored/build
+      paths from the uploaded source archive.
+    required: false
+    default: ".*/node_modules/.*,.*/dist/.*,.*/build/.*,.*/coverage/.*,.*/\\.git/.*,.*/\\.github/.*,.*\\.min\\.js,.*\\.min\\.css,.*\\.map,package-lock\\.json,yarn\\.lock"
+  break-build:
+    description: Fail the build when Checkmarx thresholds are breached
+    required: false
+    default: "false"
+  # --- outputs ---
+  sarif-file:
+    description: Path CxFlow writes SARIF to (the action default is cx.sarif)
+    required: false
+    default: cx.sarif
+  pdf-file:
+    description: Path to write the downloaded PDF report
+    required: false
+    default: checkmarx-report.pdf
 
 outputs:
   sarif-file:
     description: Path of the SARIF report produced
-    value: ${{ inputs.output-file }}
+    value: ${{ inputs.sarif-file }}
+  pdf-file:
+    description: Path of the PDF report produced (may be absent if generation failed)
+    value: ${{ inputs.pdf-file }}
+  scan-id:
+    description: Resolved CxSAST scan id
+    value: ${{ steps.cx_scan.outputs.scan_id }}
 
 runs:
   using: composite
   steps:
-    - name: Run CxFlow
+    - name: Checkmarx SAST Scan (CxFlow)
+      id: cxflow
+      uses: checkmarx-ts/checkmarx-cxflow-github-action@v2.3
+      with:
+        checkmarx_url: ${{ inputs.cx-server-url }}
+        checkmarx_username: ${{ inputs.cx-username }}
+        checkmarx_password: ${{ inputs.cx-password }}
+        checkmarx_client_secret: ${{ inputs.cx-client-secret }}
+        team: ${{ inputs.team }}
+        project: ${{ inputs.project-name }}
+        preset: ${{ inputs.preset }}
+        scanners: sast
+        incremental: false
+        break_build: ${{ inputs.break-build }}
+        github_token: ${{ inputs.github-token }}
+        app: ${{ inputs.app || inputs.project-name }}
+        params: >-
+          --cx-flow.scan-resubmit=true
+          --cx-flow.branch=${{ inputs.branch || github.head_ref || github.ref_name }}
+          --cx-flow.zip-exclude=${{ inputs.zip-exclude || '.*/node_modules/.*,.*/dist/.*,.*/build/.*,.*/coverage/.*,.*/\.git/.*,.*/\.github/.*,.*\.min\.js,.*\.min\.css,.*\.map,package-lock\.json,yarn\.lock' }}
+          --logging.level.com.checkmarx.flow=INFO
+          --logging.file.name=/github/workspace/cxflow.log
+      continue-on-error: true
+
+    - name: Fetch CxSAST access token
+      id: cx_token
+      if: always()
       shell: bash
       env:
-        CX_SERVER_URL: ${{ inputs.cx-server-url }}
+        CHECKMARX_URL: ${{ inputs.cx-server-url }}
         CX_USERNAME: ${{ inputs.cx-username }}
         CX_PASSWORD: ${{ inputs.cx-password }}
-        CX_TEAM: ${{ inputs.cx-team }}
-        CX_PROJECT: ${{ inputs.project-name }}
-        OUTPUT_FILE: ${{ inputs.output-file }}
+        CX_CLIENT_SECRET: ${{ inputs.cx-client-secret }}
       run: |
         set -euo pipefail
-        docker run --rm \
-          -v "$PWD:/code" \
-          -e CX_SERVER_URL -e CX_USERNAME -e CX_PASSWORD -e CX_TEAM \
-          checkmarx/cx-flow:latest \
-          --scan \
-          --cx-server="$CX_SERVER_URL" \
-          --cx-user="$CX_USERNAME" \
-          --cx-password="$CX_PASSWORD" \
-          --cx-team="$CX_TEAM" \
-          --cx-project="$CX_PROJECT" \
-          --app="$CX_PROJECT" \
-          --f=/code \
-          --output-type=SARIF \
-          --filename="/code/$OUTPUT_FILE"
-        # CxFlow can exit non-zero when it finds issues; that is expected here.
-        test -f "$OUTPUT_FILE" || echo '{"runs":[]}' > "$OUTPUT_FILE"
+        BODY_FILE="$(mktemp)"
+        HTTP_CODE=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -X POST \
+          "${CHECKMARX_URL%/}/cxrestapi/auth/identity/connect/token" \
+          -H "Content-Type: application/x-www-form-urlencoded" \
+          --data-urlencode "grant_type=password" \
+          --data-urlencode "username=${CX_USERNAME}" \
+          --data-urlencode "password=${CX_PASSWORD}" \
+          --data-urlencode "client_id=resource_owner_client" \
+          --data-urlencode "scope=sast_rest_api" \
+          --data-urlencode "client_secret=${CX_CLIENT_SECRET}")
+        echo "Auth endpoint HTTP $HTTP_CODE"
+        if [ "$HTTP_CODE" != "200" ]; then
+          sed -E 's/("access_token"|"refresh_token")[[:space:]]*:[[:space:]]*"[^"]*"/\1:"***"/g' "$BODY_FILE"
+          rm -f "$BODY_FILE"; exit 1
+        fi
+        TOKEN=$(jq -r '.access_token // empty' "$BODY_FILE")
+        rm -f "$BODY_FILE"
+        if [ -z "$TOKEN" ]; then
+          echo "Auth endpoint returned 200 but no access_token"; exit 1
+        fi
+        echo "::add-mask::$TOKEN"
+        echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+    - name: Resolve CxSAST scan id from CxFlow log
+      id: cx_scan
+      if: always()
+      shell: bash
+      run: |
+        set -euo pipefail
+        LOG_FILE="${GITHUB_WORKSPACE}/cxflow.log"
+        if [ ! -f "$LOG_FILE" ]; then
+          echo "$LOG_FILE not found — CxFlow may have failed before logging"; exit 1
+        fi
+        sudo chmod a+r "$LOG_FILE" || true
+        SCAN_ID=$(grep -oE 'Scan created with Id +[0-9]+|Scan-Id: *[0-9]+' "$LOG_FILE" \
+          | tail -n1 | grep -oE '[0-9]+' | tail -n1)
+        if [ -z "${SCAN_ID:-}" ]; then
+          echo "No scan id in $LOG_FILE; tail:"; tail -c 8000 "$LOG_FILE"; exit 1
+        fi
+        echo "scan_id=$SCAN_ID" >> "$GITHUB_OUTPUT"
+        echo "Resolved CxSAST scan id: $SCAN_ID"
+
+    - name: Request PDF report generation
+      id: cx_report
+      if: always() && steps.cx_token.outcome == 'success' && steps.cx_scan.outputs.scan_id != ''
+      shell: bash
+      env:
+        CHECKMARX_URL: ${{ inputs.cx-server-url }}
+        CX_TOKEN: ${{ steps.cx_token.outputs.token }}
+        SCAN_ID: ${{ steps.cx_scan.outputs.scan_id }}
+      run: |
+        set -euo pipefail
+        BODY_FILE="$(mktemp)"
+        HTTP_CODE=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -X POST \
+          "${CHECKMARX_URL%/}/cxrestapi/reports/sastScan" \
+          -H "Authorization: Bearer ${CX_TOKEN}" \
+          -H "Content-Type: application/json;v=1.0" \
+          -H "Accept: application/json;v=1.0" \
+          -d "{\"scanId\": ${SCAN_ID}, \"reportType\": \"PDF\"}")
+        echo "Reports endpoint HTTP $HTTP_CODE for scanId=${SCAN_ID}"
+        if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "202" ]; then
+          cat "$BODY_FILE"; rm -f "$BODY_FILE"; exit 1
+        fi
+        REPORT_ID=$(jq -r '.reportId // empty' "$BODY_FILE")
+        rm -f "$BODY_FILE"
+        if [ -z "$REPORT_ID" ]; then echo "no reportId in response"; exit 1; fi
+        echo "report_id=$REPORT_ID" >> "$GITHUB_OUTPUT"
+
+    - name: Poll until PDF report is ready
+      if: always() && steps.cx_report.outcome == 'success' && steps.cx_report.outputs.report_id != ''
+      shell: bash
+      env:
+        CHECKMARX_URL: ${{ inputs.cx-server-url }}
+        CX_TOKEN: ${{ steps.cx_token.outputs.token }}
+        REPORT_ID: ${{ steps.cx_report.outputs.report_id }}
+      run: |
+        set -euo pipefail
+        for i in $(seq 1 60); do
+          BODY_FILE="$(mktemp)"
+          HTTP_CODE=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -X GET \
+            "${CHECKMARX_URL%/}/cxrestapi/reports/sastScan/${REPORT_ID}/status" \
+            -H "Authorization: Bearer ${CX_TOKEN}" -H "Accept: application/json;v=1.0")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "status HTTP $HTTP_CODE attempt $i"; cat "$BODY_FILE"; rm -f "$BODY_FILE"; exit 1
+          fi
+          STATUS=$(jq -r '.status.value' "$BODY_FILE"); rm -f "$BODY_FILE"
+          echo "Attempt $i: status=$STATUS"
+          case "$STATUS" in
+            Created) exit 0 ;;
+            Failed)  echo "Report generation failed"; exit 1 ;;
+            *) : ;;
+          esac
+          sleep 5
+        done
+        echo "Timed out waiting for PDF report"; exit 1
+
+    - name: Download PDF report
+      if: always() && steps.cx_report.outcome == 'success' && steps.cx_report.outputs.report_id != ''
+      shell: bash
+      env:
+        CHECKMARX_URL: ${{ inputs.cx-server-url }}
+        CX_TOKEN: ${{ steps.cx_token.outputs.token }}
+        REPORT_ID: ${{ steps.cx_report.outputs.report_id }}
+        PDF_FILE: ${{ inputs.pdf-file }}
+      run: |
+        set -euo pipefail
+        BODY_FILE="$(mktemp)"
+        HTTP_CODE=$(curl -sS -L -o "$BODY_FILE" -w '%{http_code}' \
+          -H "Authorization: Bearer ${CX_TOKEN}" -H "Accept: application/pdf" \
+          "${CHECKMARX_URL%/}/cxrestapi/reports/sastScan/${REPORT_ID}")
+        echo "Download endpoint HTTP $HTTP_CODE"
+        if [ "$HTTP_CODE" != "200" ]; then cat "$BODY_FILE"; rm -f "$BODY_FILE"; exit 1; fi
+        mv "$BODY_FILE" "$PDF_FILE"
+        ls -lh "$PDF_FILE"
+
+    - name: Ensure SARIF exists
+      if: always()
+      shell: bash
+      env:
+        SARIF_FILE: ${{ inputs.sarif-file }}
+      run: |
+        # CxFlow writes cx.sarif; guarantee a file so downstream normalization
+        # has a consistent input even when the scan produced no SARIF.
+        test -f "$SARIF_FILE" || echo '{"runs":[]}' > "$SARIF_FILE"
