@@ -35,6 +35,7 @@ Every capability is also a standalone reusable workflow — pick only what you n
 | `reusable-build.yml` | Generic multi-stack build + test (node/python/java/go) + container | any |
 | `reusable-build-gradle.yml` | Java/Gradle build + test + Docker publish (multi-registry) | any |
 | `reusable-build-node.yml` | Node build + test + Docker publish (multi-registry) | any |
+| `reusable-build-python.yml` | Python install + test + Docker publish (multi-registry; configurable Dockerfile) | any |
 | `reusable-test.yml` | Multi-stack tests with an **enforceable coverage threshold** | PR / any |
 | `reusable-security.yml` | Scanners → one `findings.json` | any |
 | `reusable-agent-fix.yml` | Triage + safe auto-fix on the PR branch | pull_request |
@@ -45,7 +46,8 @@ Every capability is also a standalone reusable workflow — pick only what you n
 
 ### Build & publish to any registry
 
-`reusable-build-gradle.yml` and `reusable-build-node.yml` build, test, then build
+`reusable-build-gradle.yml`, `reusable-build-node.yml`, and
+`reusable-build-python.yml` build, test, then build
 and publish a Docker image via the shared `docker-publish` composite action. The
 `registry` input selects the target — `ecr` | `ghcr` | `gcp` | `acr` |
 `dockerhub` | `none` — and `save_image_artifact: true` also uploads the image as

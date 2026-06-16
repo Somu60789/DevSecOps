@@ -1,0 +1,178 @@
+name: Reusable — Python Build & Publish
+
+# Python install + test, then build & publish a Docker image to any cloud
+# registry (and/or save it as a workflow artifact). Supports a configurable
+# Dockerfile path + image name so it works for multi-service Python repos that
+# ship several Dockerfiles.
+#
+#   build:
+#     uses: Somu60789/DevSecOps/.github/workflows/reusable-build-python.yml@v1
+#     secrets: inherit
+#     with:
+#       python_version: "3.11"
+#       dockerfile: asset_api/Dockerfile
+#       registry: ecr
+#       registry_host: 123456789.dkr.ecr.ap-south-1.amazonaws.com
+#       aws_region: ap-south-1
+
+on:
+  workflow_call:
+    inputs:
+      product_repo:
+        type: string
+        default: Somu60789/DevSecOps
+      product_ref:
+        type: string
+        default: v1
+      python_version:
+        type: string
+        default: "3.12"
+      requirements_file:
+        description: Requirements file to install (if present)
+        type: string
+        default: requirements.txt
+      test_command:
+        description: Test command to run (skipped if run_tests is false)
+        type: string
+        default: "pytest -q"
+      run_tests:
+        type: boolean
+        default: true
+      # --- image publish ---
+      build_image:
+        type: boolean
+        default: true
+      context:
+        description: Docker build context
+        type: string
+        default: "."
+      dockerfile:
+        description: Path to the Dockerfile (relative to context)
+        type: string
+        default: Dockerfile
+      registry:
+        description: "ecr | ghcr | gcp | acr | dockerhub | none"
+        type: string
+        default: ghcr
+      registry_host:
+        type: string
+        default: ""
+      image_name:
+        type: string
+        default: ""
+      extra_tag:
+        type: string
+        default: ""
+      push_image:
+        type: boolean
+        default: true
+      save_image_artifact:
+        type: boolean
+        default: false
+      aws_region:
+        type: string
+        default: us-east-1
+    secrets:
+      REGISTRY_USERNAME:
+        required: false
+      REGISTRY_PASSWORD:
+        required: false
+      GCP_CREDENTIALS_JSON:
+        required: false
+      AWS_ACCESS_KEY_ID:
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        required: false
+      AWS_ROLE_ARN:
+        required: false
+    outputs:
+      image_ref:
+        description: Published image reference
+        value: ${{ jobs.build.outputs.image_ref }}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_ref: ${{ steps.publish.outputs.image_ref }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+          cache: pip
+      - name: install
+        shell: bash
+        env:
+          REQ_FILE: ${{ inputs.requirements_file }}
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          if [ -f "$REQ_FILE" ]; then
+            pip install -r "$REQ_FILE"
+          fi
+          if [ -f pyproject.toml ]; then
+            pip install -e . || true
+          fi
+          pip install pytest
+      - name: test
+        if: inputs.run_tests
+        shell: bash
+        env:
+          TEST_COMMAND: ${{ inputs.test_command }}
+        run: |
+          set -euo pipefail
+          # Non-fatal if a repo has no tests yet; fails on real test failures.
+          if compgen -G "**/test_*.py" > /dev/null 2>&1 || compgen -G "**/*_test.py" > /dev/null 2>&1 || [ -d tests ]; then
+            eval "$TEST_COMMAND"
+          else
+            echo "no tests detected; skipping"
+          fi
+      - name: upload test/coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-build-artifacts
+          path: |
+            coverage.xml
+            .coverage
+            htmlcov/**
+          if-no-files-found: ignore
+
+      - name: load product tooling
+        if: inputs.build_image
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.product_repo }}
+          ref: ${{ inputs.product_ref }}
+          path: ._devsecops
+      - name: configure AWS credentials
+        if: inputs.build_image && inputs.push_image && inputs.registry == 'ecr'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: build & publish image
+        id: publish
+        if: inputs.build_image
+        uses: ./._devsecops/.github/actions/docker-publish
+        with:
+          registry: ${{ inputs.registry }}
+          registry_host: ${{ inputs.registry_host }}
+          image_name: ${{ inputs.image_name }}
+          context: ${{ inputs.context }}
+          dockerfile: ${{ inputs.dockerfile }}
+          extra_tag: ${{ inputs.extra_tag }}
+          push: ${{ inputs.push_image }}
+          save_artifact: ${{ inputs.save_image_artifact }}
+          aws_region: ${{ inputs.aws_region }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+          gcp_credentials_json: ${{ secrets.GCP_CREDENTIALS_JSON }}
