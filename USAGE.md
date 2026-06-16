@@ -90,7 +90,14 @@ jobs:
 | Secret | Needed for |
 |--------|-----------|
 | `AGENT_API_KEY` | AI triage / fix / optimize / remediation |
-| `CX_SERVER_URL`, `CX_USERNAME`, `CX_PASSWORD`, `CX_TEAM` | Checkmarx SAST |
+| `CX_SERVER_URL`, `CX_USERNAME`, `CX_PASSWORD`, `CX_CLIENT_SECRET` | Checkmarx SAST (CxSAST OIDC `resource_owner_client`) |
+| `CX_PAT` (optional) | GitHub token CxFlow uses to post results; falls back to `GITHUB_TOKEN` |
+
+Checkmarx scan parameters are configurable inputs on the security and
+checkmarx-remediate workflows — `cx_project` (defaults to the repo name),
+`cx_team` (default `/CxServer`), `cx_preset` (default `Checkmarx Default`), and
+`cx_zip_exclude`. The scan runs via the official `checkmarx-ts/checkmarx-cxflow-github-action`
+and fetches a PDF report (uploaded alongside the SARIF) through the CxSAST REST API.
 
 ### Variables
 

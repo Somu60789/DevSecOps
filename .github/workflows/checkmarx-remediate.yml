@@ -43,9 +43,10 @@ jobs:
           cx-server-url: ${{ secrets.CX_SERVER_URL }}
           cx-username: ${{ secrets.CX_USERNAME }}
           cx-password: ${{ secrets.CX_PASSWORD }}
-          cx-team: ${{ secrets.CX_TEAM }}
+          cx-client-secret: ${{ secrets.CX_CLIENT_SECRET }}
+          github-token: ${{ secrets.CX_PAT || secrets.GITHUB_TOKEN }}
           project-name: ${{ github.event.repository.name }}
-          output-file: checkmarx.sarif
+          sarif-file: cx.sarif
 
       - uses: actions/setup-python@v6
         with:
@@ -59,7 +60,7 @@ jobs:
           python3 scripts/collect-findings.py \
             --generated-at "$gen_at" \
             --out findings.json \
-            --inputs checkmarx:sast:checkmarx.sarif
+            --inputs checkmarx:sast:cx.sarif
           count="$(python3 -c 'import json,sys; print(len(json.load(open("findings.json"))["findings"]))')"
           echo "findings: $count"
           echo "has_findings=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
@@ -68,13 +69,15 @@ jobs:
         with:
           name: checkmarx-findings
           path: |
-            checkmarx.sarif
+            cx.sarif
+            checkmarx-report.pdf
             findings.json
+          if-no-files-found: ignore
 
       - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: checkmarx.sarif
+          sarif_file: cx.sarif
           category: checkmarx
 
   remediate:

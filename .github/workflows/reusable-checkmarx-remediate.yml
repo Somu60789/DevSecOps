@@ -21,6 +21,22 @@ on:
         description: Branch to scan (defaults to the caller's default branch)
         type: string
         default: ""
+      cx_project:
+        description: Checkmarx project name (defaults to the repo name)
+        type: string
+        default: ""
+      cx_team:
+        description: CxSAST team path
+        type: string
+        default: /CxServer
+      cx_preset:
+        description: Checkmarx scan preset
+        type: string
+        default: Checkmarx Default
+      cx_zip_exclude:
+        description: CxFlow zip-exclude pattern (Java regex). Empty uses the action default.
+        type: string
+        default: ""
     secrets:
       CX_SERVER_URL:
         required: true
@@ -28,8 +44,10 @@ on:
         required: true
       CX_PASSWORD:
         required: true
-      CX_TEAM:
+      CX_CLIENT_SECRET:
         required: true
+      CX_PAT:
+        required: false
       AGENT_API_KEY:
         required: false
 
@@ -59,9 +77,13 @@ jobs:
           cx-server-url: ${{ secrets.CX_SERVER_URL }}
           cx-username: ${{ secrets.CX_USERNAME }}
           cx-password: ${{ secrets.CX_PASSWORD }}
-          cx-team: ${{ secrets.CX_TEAM }}
-          project-name: ${{ github.event.repository.name }}
-          output-file: checkmarx.sarif
+          cx-client-secret: ${{ secrets.CX_CLIENT_SECRET }}
+          github-token: ${{ secrets.CX_PAT || secrets.GITHUB_TOKEN }}
+          project-name: ${{ inputs.cx_project || github.event.repository.name }}
+          team: ${{ inputs.cx_team }}
+          preset: ${{ inputs.cx_preset }}
+          zip-exclude: ${{ inputs.cx_zip_exclude }}
+          sarif-file: cx.sarif
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -72,19 +94,21 @@ jobs:
           gen_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           python3 ._devsecops/scripts/collect-findings.py \
             --generated-at "$gen_at" --out findings.json \
-            --inputs checkmarx:sast:checkmarx.sarif
+            --inputs checkmarx:sast:cx.sarif
           count="$(python3 -c 'import json; print(len(json.load(open("findings.json"))["findings"]))')"
           echo "has_findings=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:
           name: checkmarx-findings
           path: |
-            checkmarx.sarif
+            cx.sarif
+            checkmarx-report.pdf
             findings.json
+          if-no-files-found: ignore
       - uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: checkmarx.sarif
+          sarif_file: cx.sarif
           category: checkmarx
 
   remediate:
