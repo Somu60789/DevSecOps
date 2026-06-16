@@ -34,6 +34,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: actionlint
         shell: bash
+        # actionlint shells out to shellcheck when present on the runner. We gate
+        # on real problems (warning+), not info-level style notes that are
+        # deliberate in these run blocks (intentional word-splitting, `A && B || C`
+        # fallbacks). SC2086/SC2015 are those info notes.
+        env:
+          SHELLCHECK_OPTS: "--severity=warning --exclude=SC2086,SC2015"
         run: |
           set -euo pipefail
           bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
