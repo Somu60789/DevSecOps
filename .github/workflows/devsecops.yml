@@ -28,7 +28,7 @@ jobs:
       has_docker: ${{ steps.detect.outputs.has_docker }}
       has_iac: ${{ steps.detect.outputs.has_iac }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - id: detect
         shell: bash
         run: |
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: gitleaks
@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: semgrep
         uses: semgrep/semgrep-action@v1
         with:
@@ -91,7 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # Only scan when Checkmarx credentials are configured; otherwise emit an
       # empty SARIF so the collect step has a consistent artifact to read.
       - name: check for Checkmarx credentials
@@ -133,7 +133,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: trivy filesystem (SCA + license + secrets)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -166,7 +166,7 @@ jobs:
     continue-on-error: true
     needs: detect-stack
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -201,7 +201,7 @@ jobs:
     needs: [secrets, sast, checkmarx, sca-and-iac, clean-code]
     if: always()
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
