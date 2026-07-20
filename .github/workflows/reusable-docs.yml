@@ -28,12 +28,12 @@ jobs:
     env:
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
       - name: load product tooling
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
@@ -63,11 +63,11 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: load product tooling
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
