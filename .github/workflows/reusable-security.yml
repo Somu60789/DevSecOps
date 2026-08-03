@@ -74,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: gitleaks
@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: semgrep
         uses: semgrep/semgrep-action@v1
         with:
@@ -121,9 +121,9 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: load product tooling
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
@@ -170,7 +170,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: trivy filesystem (SCA + license + secrets)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -184,7 +184,7 @@ jobs:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
       - name: checkov (IaC)
-        uses: bridgecrewio/checkov-action@v12
+        uses: bridgecrewio/checkov-action@v12.3114.0
         with:
           output_format: sarif
           output_file_path: checkov.sarif
@@ -202,8 +202,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: complexity (lizard)
@@ -233,11 +233,11 @@ jobs:
       has_findings: ${{ steps.normalize.outputs.has_findings }}
     steps:
       - name: load product tooling
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - uses: actions/download-artifact@v8
