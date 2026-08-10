@@ -87,7 +87,7 @@ jobs:
     outputs:
       image_ref: ${{ steps.publish.outputs.image_ref }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -122,7 +122,7 @@ jobs:
 
       - name: load product tooling
         if: inputs.build_image
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.product_repo }}
           ref: ${{ inputs.product_ref }}
